@@ -117,6 +117,8 @@
     const old = it.nk;
     if (k) { it.nk = k; it.link = "manual"; } else { delete it.nk; it.link = "none"; }
     L.put(it);
+    // チェッカーに結び付く前に付けた読了（ブクログからの登録など）は、チェッカーの読了に移す
+    if (k) { const r = L.reading()["b:" + it.id]; if (r?.s === "read" && !L.ndoc().read[k]) L.setNovelRead(k, r.d || 1); }
     if (old && old !== k) L.setOwn(old, false);
     if (k && it.st === "own") L.setOwn(k, true);
     L.qDelFor(it.id);

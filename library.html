@@ -33,6 +33,9 @@
   .labels figure{border:1px dashed #999}
 }
 #printArea{display:none}
+.qbar{display:grid;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg);position:sticky;top:calc(44px + env(safe-area-inset-top,0px) + 52px);z-index:4}
+.qitem .qsel{width:18px;height:18px;margin:0;flex:0 0 auto}
+.qitem.sel{border-color:var(--fg);box-shadow:inset 0 0 0 1px var(--fg)}
 .qitem{border:1px solid var(--line);border-radius:6px;padding:12px;display:grid;gap:8px}
 .cands{display:grid;gap:6px}
 .cands button{justify-content:flex-start;text-align:left;font-weight:500;border-color:var(--line);background:var(--card)}
@@ -121,7 +124,19 @@
 
   <!-- 確認待ち -->
   <section class="panel card" id="p-queue" aria-label="確認待ち" hidden>
-    <p class="small muted">迷ったものだけがここに並びます。どれもあなたが決めるまで記録は確定しません。</p>
+    <p class="small muted">迷ったものだけがここに並びます。どれもあなたが決めるまで記録は確定しません。1件ずつ決めるほか、チェックを付けてまとめて決められます。</p>
+    <div class="qbar" id="qBar" hidden>
+      <div class="row">
+        <select id="qType" aria-label="確認待ちの種類で絞る"></select>
+        <label class="row small" style="gap:6px"><input type="checkbox" id="qAll"> 表示中をすべて選ぶ</label>
+        <span class="small muted" id="qSelN">0件を選択</span>
+      </div>
+      <div class="row">
+        <select id="qAct" aria-label="選んだものをどうするか"></select>
+        <select id="qActCat" aria-label="種類" hidden></select>
+        <button type="button" class="pri" id="qRun" disabled>選んだものに適用</button>
+      </div>
+    </div>
     <div id="qList" style="display:grid;gap:10px"></div>
   </section>
 

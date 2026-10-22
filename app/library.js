@@ -30,6 +30,7 @@ function render(t = location.hash.slice(1) || "register") {
   const ready = () => { const n = Shelf.read(Lib.P.novels), f = Shelf.read(Lib.P.films); if (n) Biblio.setNovels(n); if (f) Biblio.setFilms(f); };
   ready(); Shelf.on(Lib.P.novels, ready); Shelf.on(Lib.P.films, ready);
   Lib.reconcile();
+  fixBooklogRead();
   Shelf.on(Lib.P.novelDoc, (d, remote) => { if (remote) { Lib.reconcile(); render(); } });
   let t = null;
   Shelf.onAny((p, remote) => { if (remote && /records\//.test(p)) { clearTimeout(t); t = setTimeout(() => render(), 300); } });
@@ -362,22 +363,90 @@ function bindSeries(d, it) {
 
 // ---------- 確認待ち ----------
 const QNAME = { link: "チェッカーとの結び付け", cat: "本の種類", bib: "書誌が見つからない本", check: "書誌の確認", unowned: "所有を外した本" };
+// まとめて決めるときの操作。種類ごとに使えるものだけを出す（書誌の入力は1件ずつ）
+const QACTS = [
+  { v: "link1", type: "link", label: "第1候補に結び付ける" },
+  { v: "linkNone", type: "link", label: "結び付けない" },
+  { v: "cat", type: "cat", label: "種類を決める…" },
+  { v: "ok", type: "check", label: "このままでよい" },
+  { v: "own", type: "unowned", label: "所有に戻す" },
+  { v: "gone", type: "unowned", label: "手放した" },
+  { v: "off", type: "unowned", label: "外したままにする" },
+  { v: "drop", type: "*", label: "対象が見つからないものを片付ける" },
+];
+let qType = "", qSel = new Set();
 function renderQueue() {
-  const q = Object.entries(Lib.queue()).sort((a, b) => (a[1].at < b[1].at ? -1 : 1));
+  const all = Object.entries(Lib.queue()).sort((a, b) => (a[1].at < b[1].at ? -1 : 1));
+  const by = {}; for (const [, x] of all) by[x.type] = (by[x.type] || 0) + 1;
+  if (qType && !by[qType]) qType = "";
+  $("qType").innerHTML = `<option value="">すべての種類（${all.length}件）</option>` + Object.entries(by).map(([k, n]) => `<option value="${k}"${k === qType ? " selected" : ""}>${esc(QNAME[k] || k)}（${n}件）</option>`).join("");
+  $("qBar").hidden = all.length < 2;
+  const q = qType ? all.filter(([, x]) => x.type === qType) : all;
+  for (const id of [...qSel]) if (!q.some(([k]) => k === id)) qSel.delete(id);
   const works = Shelf.read(Lib.P.novels); const wk = works ? new Map(works.books.map(b => [b.k, b])) : new Map();
   $("qList").innerHTML = q.map(([id, x]) => {
     const it = Lib.get(x.target);
-    if (!it) return `<div class="qitem"><p>対象の記録が見つかりません</p><div class="row"><button type="button" class="small quiet" data-qdone="${id}">片付ける</button></div></div>`;
+    const box = `<input type="checkbox" class="qsel" data-qsel="${id}" aria-label="まとめて決める対象にする"${qSel.has(id) ? " checked" : ""}>`;
+    if (!it) return `<div class="qitem${qSel.has(id) ? " sel" : ""}"><div class="row">${box}<p>対象の記録が見つかりません</p></div><div class="row"><button type="button" class="small quiet" data-qdone="${id}">片付ける</button></div></div>`;
     let act = "";
     if (x.type === "link") act = `<div class="cands">${(x.cands || []).map(k => wk.get(k)).filter(Boolean).map(w => `<button type="button" data-qlink="${id}" data-wk="${w.k}">これに結び付ける：${esc(w.t)}（${esc(w.a)}・${w.y}）</button>`).join("")}<button type="button" class="quiet" data-qlink="${id}" data-wk="">結び付けない</button></div>`;
     else if (x.type === "cat") act = `<div class="row"><select data-qcatsel="${id}">${CATS.map(c => `<option${c === it.cat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select><button type="button" class="small" data-qcat="${id}">この種類にする</button></div>`;
     else if (x.type === "bib") act = `<div class="grid2"><label class="f">書名<input type="text" data-qbt="${id}" value="${esc(it.t.startsWith("（") ? "" : it.t)}"></label><label class="f">著者<input type="text" data-qba="${id}" value="${esc(it.a || "")}"></label></div><div class="row"><button type="button" class="small" data-qbib="${id}">保存する</button></div>`;
     else if (x.type === "check") act = `<div class="row"><button type="button" class="small" data-qdone="${id}">このままでよい</button><button type="button" class="small quiet" data-qopen="${it.id}">書誌を直す</button></div>`;
     else if (x.type === "unowned") act = `<div class="row"><button type="button" class="small" data-qst="${id}" data-st="own">所有に戻す</button><button type="button" class="small quiet" data-qst="${id}" data-st="gone">手放した</button><button type="button" class="small quiet" data-qst="${id}" data-st="off">外したままにする</button></div>`;
-    return `<div class="qitem"><div class="row"><span class="pill warn">${esc(QNAME[x.type] || x.type)}</span><span class="small muted">${esc(x.why || "")}</span></div>
+    return `<div class="qitem${qSel.has(id) ? " sel" : ""}"><div class="row">${box}<span class="pill warn">${esc(QNAME[x.type] || x.type)}</span><span class="small muted">${esc(x.why || "")}</span></div>
       <p><b>${esc(it.t)}</b> <span class="small muted">${esc(it.a || "")}${it.pub ? "・" + esc(it.pub) : ""}${it.isbn ? "・" + esc(it.isbn) : ""}</span></p>${act}</div>`;
   }).join("") || `<p class="empty">確認待ちはありません</p>`;
+  qBarSync();
 }
+// 選んだものの種類に合う操作だけを出す
+function qBarSync() {
+  const qs = Lib.queue();
+  const types = new Set([...qSel].map(id => Lib.get(qs[id]?.target) ? qs[id]?.type : "*").filter(Boolean));
+  const shown = [...document.querySelectorAll("[data-qsel]")];
+  $("qAll").checked = shown.length > 0 && shown.every(x => x.checked);
+  $("qAll").indeterminate = !$("qAll").checked && shown.some(x => x.checked);
+  $("qSelN").textContent = `${qSel.size}件を選択`;
+  const acts = QACTS.filter(a => types.has(a.type));
+  const cur = $("qAct").value;
+  $("qAct").innerHTML = acts.length ? acts.map(a => `<option value="${a.v}"${a.v === cur ? " selected" : ""}>${esc(a.label)}</option>`).join("") : `<option value="">選ぶと、使える操作が出ます</option>`;
+  $("qAct").disabled = !acts.length;
+  $("qActCat").hidden = $("qAct").value !== "cat";
+  if (!$("qActCat").options.length) $("qActCat").innerHTML = CATS.map(c => `<option>${esc(c)}</option>`).join("");
+  const n = [...qSel].filter(id => { const x = qs[id]; const a = QACTS.find(y => y.v === $("qAct").value); return x && a && (a.type === (Lib.get(x.target) ? x.type : "*")); }).length;
+  $("qRun").disabled = !n;
+  $("qRun").textContent = n ? `選んだもののうち${n}件に適用` : "選んだものに適用";
+}
+$("qType").onchange = () => { qType = $("qType").value; qSel.clear(); renderQueue(); };
+$("qAct").onchange = qBarSync;
+$("qAll").onchange = () => {
+  for (const el of document.querySelectorAll("[data-qsel]")) { el.checked = $("qAll").checked; el.closest(".qitem").classList.toggle("sel", el.checked); if (el.checked) qSel.add(el.dataset.qsel); else qSel.delete(el.dataset.qsel); }
+  qBarSync();
+};
+$("qList").addEventListener("change", e => {
+  const c = e.target.closest("[data-qsel]"); if (!c) return;
+  if (c.checked) qSel.add(c.dataset.qsel); else qSel.delete(c.dataset.qsel);
+  c.closest(".qitem").classList.toggle("sel", c.checked); qBarSync();
+});
+$("qRun").onclick = () => {
+  const act = QACTS.find(a => a.v === $("qAct").value); if (!act) return;
+  const qs = Lib.queue(); let n = 0;
+  for (const id of [...qSel]) {
+    const x = qs[id]; if (!x) continue;
+    const it = Lib.get(x.target);
+    if (act.type === "*") { if (!it) { Lib.qDel(id); n++; } continue; }
+    if (!it || x.type !== act.type) continue;
+    if (act.v === "link1") { const k = (x.cands || [])[0]; if (!k) continue; Lib.link(it, k); }
+    else if (act.v === "linkNone") Lib.link(it, null);
+    else if (act.v === "cat") { const c = JSON.parse(JSON.stringify(it)); c.cat = $("qActCat").value; c.catAuto = false; Lib.put(c); }
+    else if (act.v === "own" || act.v === "gone") Lib.setStatus(it, act.v);
+    // ok・off：記録はそのままで確認待ちだけを片付ける
+    Lib.qDel(id); qSel.delete(id); n++;
+  }
+  qSel.clear();
+  UI.toast(`${n}件を「${act.label.replace("…", "：" + $("qActCat").value)}」にしました`);
+  setTimeout(() => render("queue"), 50);
+};
 $("qList").addEventListener("click", e => {
   const t = e.target.closest("button"); if (!t) return;
   const d = t.dataset;
@@ -477,10 +546,38 @@ $("blReg").onclick = async () => {
     const x = all.get(id); if (!x) continue;
     const ebook = /kindle|電子|ebook/i.test(x.type || "");
     const r = await Lib.register({ t: x.t, a: x.a, src: "booklog", media: ebook ? "ebook" : "paper", bib: { t: x.t, a: x.a } });
-    const it = JSON.parse(JSON.stringify(r.item)); it.blk = id; Lib.put(it); n++;
+    const it = JSON.parse(JSON.stringify(r.item)); it.blk = id;
+    markBooklogRead(it, r.vol, x.d); n++;
   }
   UI.toast(`${n}件を登録しました`); setTimeout(renderBooklog, 50);
 };
+
+// ブクログの記録は読んだ本の記録なので、そこから登録した本は読了にする。
+// 読了日はブクログの日付（2011年の日付は一括取り込みの日なので使わない。チェッカーと同じ扱い）。
+// すでに付いている読了の日付は書き換えない
+const blDate = d => /^\d{4}-\d{2}-\d{2}/.test(d || "") && !String(d).startsWith("2011") ? String(d).slice(0, 10) : "";
+function markBooklogRead(it, vol, d) {
+  const date = blDate(d);
+  if (it.kind === "series") {
+    if (vol != null) { it.vols = it.vols || {}; const v = it.vols[vol] || {}; if (!v.read) it.vols[vol] = { ...v, read: date || 1 }; }
+  } else if (it.nk) {
+    if (!Lib.ndoc().read[it.nk]) Lib.setNovelRead(it.nk, date || 1);
+  } else if (!Lib.reading()["b:" + it.id]) {
+    Lib.setReading("b:" + it.id, { s: "read", d: date || undefined, via: "booklog", n: 1 });
+  }
+  it.blkRead = 1;
+  Lib.put(it);
+}
+// 前の版でブクログから登録し、まだ読了になっていない本を一度だけ読了にする
+function fixBooklogRead() {
+  const log = new Map(booklogItems().map(x => [x.id, x]));
+  for (const it0 of Object.values(Lib.items())) {
+    if (!it0.blk || it0.blkRead) continue;
+    const x = log.get(it0.blk); const it = JSON.parse(JSON.stringify(it0));
+    const vol = it.kind === "series" && x ? Biblio.splitVolume(x.t).vol : null;
+    markBooklogRead(it, vol, x?.d);
+  }
+}
 
 // ---------- 外した本 ----------
 function renderOff() {
