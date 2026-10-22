@@ -755,7 +755,11 @@ $("tiers").addEventListener("click", e=>{
   state.tier = state.tier===b.dataset.t ? null : b.dataset.t; state.shown=PAGE;
   renderSummary(); renderList();
 });
-function renderAll(){ renderSummary(); renderList(); renderPick() }
+// 開くときは記録が順にそろうたびに一覧を描き直していたので、そろうまで描くのを待ち、最後に1回だけ描く
+var BOOT = true;
+function renderAll(){ if(BOOT) return; renderSummary(); renderList(); renderPick() }
+const endBoot = () => { if(!BOOT) return; BOOT = false; renderAll() };
+setTimeout(endBoot, 2500);
 
 // ---------- today's pick ----------
 let pickKey = null, pickDay = null, pickN = 0;
@@ -973,14 +977,24 @@ async function afterCustomChange(){
   await saveCustoms();
 }
 // off-list watched films that now match a film in the list move into "seen"
+// 一致しなかった記録は、作品の一覧が変わるまで照合し直さない（開くたびに1,000件以上を照合して重かった）
+let OFFMISS = null;
 function promoteOff(){
   if(!offlist.length) return;
+  const sig = films.length + "|" + Object.entries(customs).map(([k,c])=>k+":"+(c.include?1:0)+":"+((c.items||[]).length)).join(",");
+  if(!OFFMISS){ try{ const x = JSON.parse(localStorage.getItem("shelf.offMiss")||"null"); OFFMISS = x && x.sig === sig ? Object.assign(new Set(x.miss), {sig}) : null }catch(_){} }
+  if(OFFMISS && OFFMISS.sig !== sig) OFFMISS = null;
+  const okey = o => (o.t||"") + "\t" + (o.y||"");
+  if(OFFMISS && offlist.every(o=>OFFMISS.has(okey(o)))) return;
   buildIdx(films);
-  const keep = []; let moved = 0;
+  const keep = []; let moved = 0; const miss = new Set();
   for(const o of offlist){
+    if(OFFMISS && OFFMISS.has(okey(o))){ keep.push(o); miss.add(okey(o)); continue }
     const m = matchOne({t:o.t, y:o.y});
-    if(m.f && m.how === "ok"){ if(!seen[m.f.k]) seen[m.f.k] = o.d || NODATE; moved++ } else keep.push(o);
+    if(m.f && m.how === "ok"){ if(!seen[m.f.k]) seen[m.f.k] = o.d || NODATE; moved++ } else { keep.push(o); miss.add(okey(o)) }
   }
+  OFFMISS = miss; OFFMISS.sig = sig;
+  try{ localStorage.setItem("shelf.offMiss", JSON.stringify({sig, miss:[...miss]})) }catch(_){}
   buildIdx(BASE);
   if(moved){ offlist = keep; lsWrite(); schedule(); saveOff(); renderOff() }
 }
@@ -1248,5 +1262,4 @@ recompute();
 buildControls();
 initPick();
 $("statSec").addEventListener("toggle", renderStats);
-renderAll();
-initStore();
+initStore().finally(endBoot);

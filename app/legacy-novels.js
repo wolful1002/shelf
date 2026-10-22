@@ -1070,9 +1070,13 @@ function initLog(){
   });
 }
 
-function renderAll(){ renderSummary(); renderList(); renderPick() }
+// 開くときは記録が順にそろうたびに一覧を描き直していたので、そろうまで描くのを待ち、最後に1回だけ描く
+var BOOT = true;
+function renderAll(){ if(BOOT) return; renderSummary(); renderList(); renderPick() }
+{ const m = renderMy, l = renderLog; renderMy = () => { if(!BOOT) m() }; renderLog = () => { if(!BOOT) l() } }
+const endBoot = () => { if(!BOOT) return; BOOT = false; renderAll(); renderMy(); renderLog(); renderBibInfo() };
+setTimeout(endBoot, 2500);
 custom = cRead(); blog = lRead(); applyCustom();
 buildControls(); buildMeta(); initMy(); initLog();
 ({read, want, own} = lsRead()); autoApply();
-renderAll(); renderMy(); renderLog();
-initStore();
+initStore().finally(endBoot);

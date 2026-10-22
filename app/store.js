@@ -45,7 +45,8 @@
 
   // ---------- 状態 ----------
   const files = new Map();   // path -> {sha, data}
-  let tree = {};             // path -> sha（最後に取った指紋）
+  let tree = {};             // path -> sha（この端末に写しを持っているファイルの指紋）
+  let known = {};            // path -> sha（保管場所にあると最後に確かめたファイルの一覧。写しを持っていないものも含む）
   let queue = [];            // 送信待ち [{t:'doc', path, body} | {t:'item', path, id, value}]
   const subs = new Map();    // path -> Set(cb)
   const anySubs = new Set();
@@ -116,8 +117,11 @@
       try {
         const v0 = new Map(ver);
         const t = await fetchTree();
+        known = t; idbSet("known", known);
+        // 取り直すのは、この画面に要るファイルのうち、端末の写しと指紋が違うものだけ。
+        // ほかの画面のファイルは、その画面を開いたときに取る
         const isNeed = p => !needRe || needRe.test(p);
-        const changed = Object.keys(t).filter(p => files.get(p)?.sha !== t[p]).sort((a, b) => isNeed(b) - isNeed(a));
+        const changed = Object.keys(t).filter(p => isNeed(p) && (files.has(p) ? files.get(p).sha : tree[p]) !== t[p]);
         let needLeft = changed.filter(isNeed).length, done = 0;
         if (!needLeft) markNeed();
         const one = async p => {
@@ -137,7 +141,6 @@
         };
         const list = changed.slice();
         await Promise.all(Array.from({ length: Math.min(6, list.length) }, async () => { while (list.length) await one(list.shift()); }));
-        for (const p of Object.keys(t)) if (!changed.includes(p)) tree[p] = t[p];
         await idbSet("tree", tree);
         setStatus({ state: queue.length ? "pending" : "ok", msg: queue.length ? "" : "最新です" });
         if (queue.length) flush();
@@ -160,6 +163,8 @@
   async function currentSha(path) { const t = await fetchTree(); return t[path] || null; }
   async function flush() {
     if (flushing || !queue.length) return;
+    // 取り直しの最中なら、終わってから送る（最新の中身に当てるため）
+    if (refreshing) { try { await refreshing; } catch {} if (flushing || !queue.length) return; }
     if (!navigator.onLine || !token()) { setStatus({ state: navigator.onLine ? "notoken" : "offline" }); return; }
     flushing = true;
     setStatus({ state: "syncing", msg: "送信中" });
@@ -229,19 +234,22 @@
       if (opts.need) needRe = new RegExp("^(" + opts.need.map(x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")");
       ready = (async () => {
         const t = await idbGet("tree"); if (t) tree = t;
+        known = (await idbGet("known")) || tree;
         let q = null;
         try { q = localStorage.getItem("shelf.queueInIdb") ? await idbGet("queue") : JSON.parse(localStorage.getItem("shelf.queue") || "null"); } catch {}
         if (!q) q = await idbGet("queue");
         if (Array.isArray(q)) queue = q;
-        const fs = await Promise.all(Object.keys(tree).map(async p => [p, await idbGet("f:" + p)]));
+        // 端末の写しから読むのは、この画面に要るファイルだけ（ほかの画面の作品データまで読むと開くのが遅くなる）
+        const fs = await Promise.all(Object.keys(tree).filter(p => !needRe || needRe.test(p)).map(async p => [p, await idbGet("f:" + p)]));
         for (const [p, f] of fs) if (f) files.set(p, f);
         setStatus({ state: queue.length ? "pending" : "idle" });
-        const haveNeed = files.size && [...Object.keys(tree)].filter(p => !needRe || needRe.test(p)).every(p => files.has(p));
+        // この画面に要るファイルの写しが、保管場所にあるものすべてそろっているか（1つでも欠けていれば最新を待つ）
+        const needList = Object.keys(known).filter(p => !needRe || needRe.test(p));
+        const haveNeed = needList.length > 0 && needList.every(p => files.has(p));
         refresh();
-        // 電波があれば、この画面に要るファイルの最新を待つ（古い写しのまま判断しないため）。
-        // 写しがあるときは長くても3秒で写しのまま開き、残りは後ろで取る。初めての端末は要るファイルがそろうまで待つ
+        // 写しがあれば、待たずにすぐ写しで開く。新しい中身は後ろで取り、届いたら画面に反映する。
+        // 初めての端末（写しがない）だけ、要るファイルがそろうまで待つ
         if (!haveNeed) await needDone;
-        else if (navigator.onLine) await Promise.race([needDone, sleep(3000)]);
         addEventListener("online", () => { refresh(); flush(); });
         document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refresh(); });
         setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 90000);

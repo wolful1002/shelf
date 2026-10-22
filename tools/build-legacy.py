@@ -88,6 +88,23 @@ PATCHES = {
          '  const all = unRows(), out = [];\n  lgUI.unFull = !!lgUI.open.un;\n  for(const it of all){\n    if(!lgUI.open.un) break;\n'],
         ['if(d) lgUI.open[d.dataset.lg] = d.open }',
          'if(d){ lgUI.open[d.dataset.lg] = d.open; if(d.dataset.lg === "un" && d.open && !lgUI.unFull) renderLogUn() } }'],
+
+        # 開くときは記録がそろうまで描くのを待ち、最後に1回だけ描く
+        ["function renderAll(){ renderSummary(); renderList(); renderPick() }\ncustom = cRead();",
+         "// 開くときは記録が順にそろうたびに一覧を描き直していたので、そろうまで描くのを待ち、最後に1回だけ描く\nvar BOOT = true;\nfunction renderAll(){ if(BOOT) return; renderSummary(); renderList(); renderPick() }\n{ const m = renderMy, l = renderLog; renderMy = () => { if(!BOOT) m() }; renderLog = () => { if(!BOOT) l() } }\nconst endBoot = () => { if(!BOOT) return; BOOT = false; renderAll(); renderMy(); renderLog(); renderBibInfo() };\nsetTimeout(endBoot, 2500);\ncustom = cRead();"],
+        ["renderAll(); renderMy(); renderLog();\ninitStore();",
+         "initStore().finally(endBoot);"],
+    ],
+    "films": [
+        # 開くときは記録がそろうまで描くのを待ち、最後に1回だけ描く
+        ["function renderAll(){ renderSummary(); renderList(); renderPick() }\n\n// ---------- today",
+         "// 開くときは記録が順にそろうたびに一覧を描き直していたので、そろうまで描くのを待ち、最後に1回だけ描く\nvar BOOT = true;\nfunction renderAll(){ if(BOOT) return; renderSummary(); renderList(); renderPick() }\nconst endBoot = () => { if(!BOOT) return; BOOT = false; renderAll() };\nsetTimeout(endBoot, 2500);\n\n// ---------- today"],
+        ["renderAll();\ninitStore();",
+         "initStore().finally(endBoot);"],
+ 
+        # 照合できなかったリスト外の鑑賞は、作品の一覧が変わるまで照合し直さない
+        ["function promoteOff(){\n  if(!offlist.length) return;\n  buildIdx(films);\n  const keep = []; let moved = 0;\n  for(const o of offlist){\n    const m = matchOne({t:o.t, y:o.y});\n    if(m.f && m.how === \"ok\"){ if(!seen[m.f.k]) seen[m.f.k] = o.d || NODATE; moved++ } else keep.push(o);\n  }\n  buildIdx(BASE);",
+         "// 一致しなかった記録は、作品の一覧が変わるまで照合し直さない（開くたびに1,000件以上を照合して重かった）\nlet OFFMISS = null;\nfunction promoteOff(){\n  if(!offlist.length) return;\n  const sig = films.length + \"|\" + Object.entries(customs).map(([k,c])=>k+\":\"+(c.include?1:0)+\":\"+((c.items||[]).length)).join(\",\");\n  if(!OFFMISS){ try{ const x = JSON.parse(localStorage.getItem(\"shelf.offMiss\")||\"null\"); OFFMISS = x && x.sig === sig ? Object.assign(new Set(x.miss), {sig}) : null }catch(_){} }\n  if(OFFMISS && OFFMISS.sig !== sig) OFFMISS = null;\n  const okey = o => (o.t||\"\") + \"\\t\" + (o.y||\"\");\n  if(OFFMISS && offlist.every(o=>OFFMISS.has(okey(o)))) return;\n  buildIdx(films);\n  const keep = []; let moved = 0; const miss = new Set();\n  for(const o of offlist){\n    if(OFFMISS && OFFMISS.has(okey(o))){ keep.push(o); miss.add(okey(o)); continue }\n    const m = matchOne({t:o.t, y:o.y});\n    if(m.f && m.how === \"ok\"){ if(!seen[m.f.k]) seen[m.f.k] = o.d || NODATE; moved++ } else { keep.push(o); miss.add(okey(o)) }\n  }\n  OFFMISS = miss; OFFMISS.sig = sig;\n  try{ localStorage.setItem(\"shelf.offMiss\", JSON.stringify({sig, miss:[...miss]})) }catch(_){}\n  buildIdx(BASE);"],
     ],
 }
 
