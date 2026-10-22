@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>必読書チェッカー — shelf</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="app/icon.svg" type="image/svg+xml">
+</head>
+<body>
+
+
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@600;900&family=BIZ+UDPGothic:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a reading ledger — progress header, tier shelf, sticky filters, then one long list; each row carries a 14-spine strip (one spine per source list: dark = listed, pale = could have been listed, dotted = outside that list's scope) */
+:root{
+  --bg:#eceff2; --paper:#fbfcfd; --ink:#1b2233; --muted:#5d6676; --line:#d3d8df;
+  --accent:#8e3b36; --accent-soft:#f3dfdc; --done:#2b6656; --done-soft:#dbebe5;
+  --spine-on:#1b2233; --spine-el:#c9cfd8; --want:#b07a12;
+  --display:"Zen Old Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
+  --body:"BIZ UDPGothic","Hiragino Sans","Yu Gothic",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12161d; --paper:#1a1f28; --ink:#e6e9ef; --muted:#98a1b0; --line:#2c3340;
+  --accent:#e08a80; --accent-soft:#3a2321; --done:#79c4ab; --done-soft:#1b322b;
+  --spine-on:#e6e9ef; --spine-el:#3a4250; --want:#e3b64d; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12161d; --paper:#1a1f28; --ink:#e6e9ef; --muted:#98a1b0; --line:#2c3340;
+  --accent:#e08a80; --accent-soft:#3a2321; --done:#79c4ab; --done-soft:#1b322b;
+  --spine-on:#e6e9ef; --spine-el:#3a4250; --want:#e3b64d; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.6;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 64px}
+.wrap{max-width:1060px;margin:0 auto;display:flex;flex-direction:column;gap:24px}
+button,select,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px;align-items:end}
+@media (max-width:720px){header{grid-template-columns:minmax(0,1fr)}}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.12em;color:var(--muted)}
+h1{font-family:var(--display);font-weight:900;font-size:clamp(32px,6vw,54px);line-height:1.15;margin:6px 0 10px;text-wrap:balance}
+.lede{margin:0;color:var(--muted);max-width:64ch}
+.meter{font-family:var(--mono);text-align:right;min-width:200px}
+@media (max-width:720px){.meter{text-align:left}}
+.meter .big{font-size:clamp(40px,8vw,62px);line-height:1;font-weight:500;font-variant-numeric:tabular-nums}
+.meter .big small{font-size:.36em;color:var(--muted)}
+.meter .sub{font-size:12px;color:var(--muted);margin-top:6px}
+.sync b{font-weight:500;color:var(--done)}
+.bar{display:block;height:6px;background:var(--spine-el);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--done);width:0;transition:width .4s}
+
+.tiers{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+@media (max-width:760px){.tiers{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tier{all:unset;cursor:pointer;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.tier:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tier[aria-pressed="true"]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.tier .lbl{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.tier .nm{font-weight:700;font-size:14px}
+.tier .rng{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
+.tier .ct{font-family:var(--mono);font-size:20px;font-variant-numeric:tabular-nums}
+.tier .ct small{font-size:12px;color:var(--muted)}
+
+.pick{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:16px 18px;display:grid;gap:12px}
+.pick h2{margin:0;font-size:13px;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.pick .pf{display:flex;flex-wrap:wrap;gap:8px}
+.pick .pt{font-family:var(--display);font-weight:900;font-size:clamp(22px,4vw,30px);line-height:1.3}
+.pick .pm{font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 12px}
+.pick .pb{display:flex;flex-wrap:wrap;gap:8px}
+.btn{all:unset;cursor:pointer;font-size:13px;padding:7px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.btn.pri{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:10px;border-bottom:1px solid var(--line)}
+@media (max-width:640px){.controls{position:static}}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.controls input[type=search],select{font-size:14px;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:7px 9px;min-width:0;max-width:100%}
+.controls input[type=search]{flex:1 1 220px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--paper)}
+.seg button{all:unset;cursor:pointer;padding:7px 11px;font-size:13px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.count{font-family:var(--mono);font-size:12px;color:var(--muted);margin-left:auto}
+
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--muted);align-items:center}
+.legend .k{display:inline-flex;gap:6px;align-items:center}
+
+ol.list{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+.row{border-bottom:1px solid var(--line);content-visibility:auto;contain-intrinsic-size:auto 76px}
+.row.done{background:var(--done-soft)}
+.rh{display:grid;grid-template-columns:34px 46px minmax(0,1fr) auto;gap:4px 14px;align-items:center;padding:12px 4px}
+@media (max-width:640px){.rh{grid-template-columns:34px minmax(0,1fr) auto}.rh .no{display:none}.rh .strip{grid-column:2/4}}
+.chk{all:unset;cursor:pointer;width:26px;height:26px;border:1.5px solid var(--muted);border-radius:5px;display:grid;place-items:center;background:var(--paper)}
+.chk:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.chk svg{width:15px;height:15px;opacity:0}
+.done .chk{background:var(--done);border-color:var(--done)}
+.done .chk svg{opacity:1;color:var(--paper)}
+.no{font-family:var(--mono);font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
+.ttl{min-width:0}
+.ttl button.open{all:unset;cursor:pointer;font-family:var(--display);font-weight:600;font-size:17px;line-height:1.4;overflow-wrap:anywhere}
+.ttl button.open:hover{text-decoration:underline;text-decoration-color:var(--accent)}
+.ttl button.open:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.done .ttl .tl{color:var(--muted)}
+.ttl .tl{font-family:var(--display);font-weight:600;font-size:17px;line-height:1.4;color:var(--ink);text-decoration:none;overflow-wrap:anywhere}
+.ttl .tl:hover{text-decoration:underline;text-decoration-color:var(--accent)}
+.lk{all:unset;cursor:pointer;border-bottom:1px dotted var(--muted)}
+.lk:hover{color:var(--ink);border-bottom-color:var(--accent)}
+.lk:focus-visible,.detb:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.lk.tj{font-size:12px}
+.tjw{font-size:12px;color:var(--muted);white-space:normal}
+.lk.pubj{font-size:12px;color:var(--muted)}
+.pubj{font-size:12px;color:var(--muted)}
+.acts{display:flex;gap:14px;align-items:center;margin-top:3px}
+.detb{all:unset;cursor:pointer;font-size:12px;white-space:nowrap;padding:1px 9px;border:1px solid var(--line);border-radius:4px;background:var(--paper)}
+.detb[aria-expanded="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+li.grp{display:flex;align-items:baseline;gap:10px;padding:18px 4px 6px;border-bottom:1px solid var(--ink);font-family:var(--display);font-weight:900;font-size:18px}
+li.grp small{font-family:var(--mono);font-weight:400;font-size:12px;color:var(--muted)}
+.row.flash{box-shadow:inset 3px 0 0 var(--accent)}
+.backbtn{all:unset;cursor:pointer;position:fixed;z-index:20;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--paper);font-size:14px;font-weight:700;padding:10px 18px;border-radius:999px;box-shadow:0 4px 18px rgba(0,0,0,.25);white-space:nowrap;max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis}
+.backbtn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.backbtn[hidden]{display:none}
+.meta{font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:2px 10px}
+.meta .yr{font-family:var(--mono)}
+.meta .when{color:var(--done);font-family:var(--mono)}
+.tag{font-size:11px;padding:0 6px;border-radius:3px;border:1px solid var(--line);white-space:nowrap}
+.tag.no-tr{color:var(--accent);border-color:var(--accent)}
+.tag.jp{color:var(--done);border-color:var(--done)}
+.tag.gn{background:var(--bg);color:var(--ink)}
+.wantb{all:unset;cursor:pointer;font-size:12px;color:var(--muted);white-space:nowrap}
+.amz{font-size:12px;color:var(--muted);white-space:nowrap}
+.rc{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.ownb{all:unset;box-sizing:border-box;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:72px;min-height:38px;padding:6px 12px;border:1.5px solid var(--line);border-radius:9px;background:var(--paper);color:var(--muted);font-size:14px;font-weight:600;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+.ownb .ob{font-size:15px;line-height:1}
+.ownb:hover{border-color:var(--muted)}
+.ownb[aria-pressed="true"]{background:var(--done-soft);border-color:var(--done);color:var(--done)}
+.ownb:focus-visible,.wantb:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wantb[aria-pressed="true"]{color:var(--want);font-weight:700}
+.wantb:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.score{font-family:var(--mono);font-size:11.5px;text-align:right;white-space:nowrap;color:var(--muted)}
+.score b{display:block;font-size:21px;font-weight:500;line-height:1;color:var(--ink)}
+.score.hi b{color:var(--accent)}
+.strip{display:flex;gap:3px;align-items:flex-end;grid-column:3/4;height:16px}
+.strip i{width:7px;height:16px;border-radius:1px;background:transparent;border:1px dotted var(--spine-el)}
+.strip i.el{background:var(--spine-el);border:0}
+.strip i.on{background:var(--spine-on);border:0}
+.strip i.base.on{background:var(--accent)}
+.strip i.sep{margin-left:5px}
+.strip{flex-wrap:nowrap;overflow:hidden}
+.strip i{flex:0 0 auto;width:6px}
+
+.det{padding:2px 4px 16px 98px;display:grid;gap:14px}
+@media (max-width:640px){.det{padding-left:52px}}
+.det h3{margin:0 0 6px;font-size:12px;letter-spacing:.06em;color:var(--muted);font-weight:700}
+.det ul{margin:0;padding:0;list-style:none;display:grid;gap:3px;font-size:13.5px}
+.det li{display:flex;gap:8px;align-items:baseline;min-width:0}
+.det li .r{font-family:var(--mono);font-size:12px;color:var(--muted);min-width:52px}
+.det li.off{color:var(--muted)}
+.det .links{display:flex;flex-wrap:wrap;gap:8px}
+.det a{color:var(--ink)}
+.same button{all:unset;cursor:pointer;text-decoration:underline;text-decoration-color:var(--line)}
+.same button:focus-visible{outline:2px solid var(--accent)}
+.empty{padding:40px 0;text-align:center;color:var(--muted)}
+
+details.box{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:14px 18px}
+details.box summary{cursor:pointer;font-weight:700}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 32px;margin-top:16px}
+@media (max-width:700px){.stats{grid-template-columns:minmax(0,1fr)}}
+.stats h3{margin:0 0 8px;font-size:13px}
+.hb{display:grid;grid-template-columns:minmax(0,9em) minmax(0,1fr) auto;gap:5px 10px;align-items:center;font-size:12.5px}
+.hb .lb{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hb .tr{height:8px;background:var(--spine-el);border-radius:4px;overflow:hidden}
+.hb .tr i{display:block;height:100%;background:var(--done)}
+.hb .vl{font-family:var(--mono);font-size:11.5px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.srcs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 26px;margin-top:14px}
+@media (max-width:640px){.srcs{grid-template-columns:minmax(0,1fr)}}
+.src{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:start;font-size:13px}
+.src .k{font-family:var(--mono);font-size:11px;color:var(--muted);padding-top:2px}
+.src a{color:var(--ink)}
+.src .nt{color:var(--muted);font-size:12px}
+.src .pg{font-family:var(--mono);font-size:12px;white-space:nowrap;color:var(--muted)}
+.method{font-size:13px;color:var(--muted);max-width:72ch;margin:14px 0 0;display:grid;gap:8px}
+.method p{margin:0}
+.bk{display:grid;gap:10px;margin-top:12px}
+.bk textarea{width:100%;min-height:90px;font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px}
+.bk .row2{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.bk .msg{font-size:13px;color:var(--muted)}
+.my .fg{display:flex;flex-wrap:wrap;gap:10px}
+.my label{display:grid;gap:4px;font-size:12.5px;color:var(--muted)}
+.my label.full{grid-column:1/-1}
+.my input,.my select{font:inherit;font-size:13.5px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;min-width:0}
+.my .fg input{width:min(320px,100%)}
+.my .yr2{display:flex;gap:6px;align-items:center}.my .yr2 input{width:80px}
+.my textarea{min-height:140px}
+.prev{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.prev li{display:grid;grid-template-columns:2.6em 1fr;gap:8px;align-items:start;padding:8px;border:1px solid var(--line);border-radius:8px}
+.prev li.ng{border-color:var(--accent)}
+.prev li.sk{opacity:.55}
+.prev .pr{font-family:var(--mono);font-size:12px;color:var(--muted);padding-top:7px;text-align:right}
+.prev .pl{display:grid;gap:6px}
+.prev .pl .r1{display:flex;flex-wrap:wrap;gap:6px}
+.prev .pl .r1 input{flex:1 1 180px}
+.prev .pl select{max-width:100%}
+.prev .nf{display:flex;flex-wrap:wrap;gap:6px}
+.prev .nf input[data-f=y]{width:80px}.prev .nf input[data-f=o]{flex:1 1 160px}
+.mylist{display:grid;gap:8px}
+.rdpop{position:absolute;z-index:40;width:min(320px,calc(100vw - 16px));background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:12px;display:grid;gap:8px;font-size:13.5px}
+.rdpop[hidden]{display:none}
+.rdpop .rp-t{font-weight:600;line-height:1.35}
+.rdpop .rp-s,.rdpop .rp-n{color:var(--muted);font-size:12.5px;margin:0}
+.rdpop .rp-e{color:var(--accent);font-size:12.5px;margin:0}.rdpop .rp-e:empty{display:none}
+.rdpop .rp-d{display:flex;flex-wrap:wrap;gap:6px;align-items:center;border-top:1px solid var(--line);padding-top:8px}
+.rdpop .rp-d span{width:100%;color:var(--muted);font-size:12.5px}
+.rdpop input[type=date]{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 8px;flex:1 1 140px;min-width:0}
+.rdpop .rp-f{display:flex;gap:6px;justify-content:flex-end;border-top:1px solid var(--line);padding-top:8px}
+button.when{font:inherit;font-size:12px;background:none;border:0;padding:0;color:var(--done);cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+.list li.more{list-style:none;display:flex;justify-content:center;padding:16px 0}
+.lgl{list-style:none;margin:0;padding:0;display:grid;gap:4px;max-height:420px;overflow:auto;font-size:13px}
+.lgl li{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line)}
+.lgl .lt{color:var(--muted);font-size:12px}
+.lgl button{font:inherit;font-size:12px}
+.tagm{display:inline-block;margin-left:6px;font-size:11px;padding:0 5px;border-radius:4px;background:var(--done-soft);color:var(--done)}
+.unl{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:6px;max-height:560px;overflow:auto}
+.unl li{border:1px solid var(--line);border-radius:8px;padding:8px;display:grid;gap:6px;font-size:13px}
+.unl .ua{display:flex;flex-wrap:wrap;gap:6px}
+.unl select{flex:1 1 220px;max-width:100%}
+.unl input{flex:1 1 160px;min-width:0}
+.my .row2 input#unQ{flex:1 1 220px;min-width:0}
+.fic{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:12.5px;margin-top:6px}
+.mylist .src span.acts2{display:flex;gap:6px}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+</style><div id="shelfBar" style="position:sticky;top:0;z-index:60;display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:6px 10px;margin:-8px 0 12px;background:var(--paper,#fff);border-bottom:1px solid var(--line,#ddd);font:14px/1.4 system-ui,sans-serif">
+<a href="index.html" style="font-weight:700;color:inherit;text-decoration:none;margin-right:6px">shelf</a>
+<a href="index.html" style="color:inherit;opacity:.75;padding:4px 8px;text-decoration:none">ホーム</a>
+<a href="library.html" style="color:inherit;opacity:.75;padding:4px 8px;text-decoration:none">蔵書</a>
+<a href="novels.html" style="color:inherit;padding:4px 8px;text-decoration:none;font-weight:700">必読書</a>
+<a href="films.html" style="color:inherit;padding:4px 8px;text-decoration:none;opacity:.75">映画</a>
+<span id="shelfSync" style="margin-left:auto;font-size:12px;opacity:.8">…</span>
+</div>
+<p id="shelfMsg" hidden style="padding:10px 12px;border-radius:8px;background:#f6ead2;color:#5a3d0a;font:14px system-ui,sans-serif"></p>
+
+
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow" id="eyebrow">LISTS</div>
+      <h1>生涯読書リスト</h1>
+      <p class="lede">『死ぬまでに読むべき1001冊』を土台に、文学の名作リスト、読者投票、ミステリー・SF・ファンタジー・ホラーの専門リスト、日本国内のランキングまで<span id="nLists">36</span>本を突き合わせた小説の一覧です。載る資格があるリストのうち、実際に載った割合が高い作品ほど上に並びます。</p>
+    </div>
+    <div class="meter">
+      <div class="big" id="readBig">0</div>
+      <div class="bar" style="margin-top:10px"><i id="readBar"></i></div>
+      <div class="sub sync" id="sync">記録を読み込み中…</div>
+    </div>
+  </header>
+
+  <div class="tiers" id="tiers" role="group" aria-label="優先度で絞り込む"></div>
+
+  <section class="pick" aria-labelledby="pickH">
+    <h2 id="pickH">今日の1冊</h2>
+    <div class="pf">
+      <select id="pTier" aria-label="今日の1冊の優先度"></select>
+      <select id="pCty" aria-label="今日の1冊の国"></select>
+      <select id="pGn" aria-label="今日の1冊のジャンル">
+        <option value="">ジャンル：すべて</option>
+        <option value="L">文学リストに載る作品</option>
+        <option value="M">ミステリー・スリラー</option>
+        <option value="SF">SF</option>
+        <option value="F">ファンタジー</option>
+        <option value="H">ホラー</option>
+      </select>
+      <select id="pTr" aria-label="今日の1冊の邦訳">
+        <option value="">日本語で読める作品</option>
+        <option value="all">邦訳なしも含む</option>
+      </select>
+      <select id="pWant" aria-label="読みたい印で絞る">
+        <option value="">すべての未読</option>
+        <option value="want">読みたい印のみ</option>
+        <option value="own">所有している本のみ（積読）</option>
+        <option value="wantown">読みたい印か所有</option>
+      </select>
+    </div>
+    <div id="pickCard"></div>
+  </section>
+
+  <div class="controls">
+    <input type="search" id="q" placeholder="書名・原題・著者・年で検索" aria-label="検索">
+    <select id="list" aria-label="リストで絞り込む"></select>
+    <select id="cty" aria-label="国で絞り込む"></select>
+    <select id="era" aria-label="時代で絞り込む"></select>
+    <select id="kd" aria-label="種別で絞り込む">
+      <option value="">種別：すべて</option>
+      <option value="L">文学リストに載る作品</option>
+      <option value="P">大衆・ジャンルのリストのみ</option>
+    </select>
+    <select id="gn" aria-label="ジャンルで絞り込む">
+      <option value="">ジャンル：すべて</option>
+      <option value="M">ミステリー・犯罪・スリラー</option>
+      <option value="SF">SF</option>
+      <option value="F">ファンタジー</option>
+      <option value="H">ホラー</option>
+      <option value="none">ジャンル指定なし</option>
+    </select>
+    <select id="tr" aria-label="邦訳で絞り込む">
+      <option value="">邦訳：すべて</option>
+      <option value="ja">日本語で読める</option>
+      <option value="none">邦訳なし</option>
+    </select>
+    <select id="sort" aria-label="並び順">
+      <option value="score">優先度順</option>
+      <option value="year">発表年順</option>
+      <option value="yeard">新しい順</option>
+      <option value="decade">年代順</option>
+      <option value="author">著者順</option>
+      <option value="country">国順</option>
+      <option value="tyear">邦訳の刊行年順</option>
+      <option value="publisher">出版社順</option>
+    </select>
+    <div class="seg" role="group" aria-label="読書状況">
+      <button id="fAll" aria-pressed="true">すべて</button>
+      <button id="fTodo" aria-pressed="false">未読</button>
+      <button id="fWant" aria-pressed="false">読みたい</button>
+      <button id="fDone" aria-pressed="false">読了</button>
+      <button id="fOwn" aria-pressed="false">所有</button>
+      <button id="fTsun" aria-pressed="false" title="所有していて未読">積読</button>
+    </div>
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="legend">
+    <span class="k"><span class="strip" style="height:16px"><i class="on base"></i></span>1001冊</span>
+    <span class="k"><span class="strip" style="height:16px"><i class="on"></i></span>掲載</span>
+    <span class="k"><span class="strip" style="height:16px"><i class="el"></i></span>対象だが未掲載</span>
+    <span class="k"><span class="strip" style="height:16px"><i></i></span>対象外（言語・時代・国）</span>
+    <span>帯の並び：文学・名作 → 読者投票 → ジャンル・国内</span>
+  </div>
+
+  <ol class="list" id="list-ol"></ol>
+  <div class="rdpop" id="rdPop" hidden role="dialog" aria-label="読了の記録"></div>
+  <button class="backbtn" id="backBtn" hidden>← 前の画面に戻る</button>
+
+  <details class="box" id="statsBox">
+    <summary>達成状況</summary>
+    <div class="stats" id="stats"></div>
+  </details>
+
+  <details class="box">
+    <summary>集計に使ったリスト</summary>
+    <div class="srcs" id="srcs"></div>
+    <p class="msg" id="bibInfo" style="margin:10px 0 0;font-size:13px;color:var(--muted)"></p>
+    <div class="method">
+      <p>リストは「文学・名作」「読者投票」と「ジャンル・国内専門」の2群に分け、群ごとに「載っているリスト数 ÷（載る資格のあるリスト数＋3）」を出し、高いほうをスコアにしています。＋3は、対象リストが少ない作品が1本載っただけで満点にならないための補正です。</p>
+      <p>載る資格は作品ごとに判定しています。TIMEは1923–2005年の英語小説、ル・モンドは20世紀の作品、推理作家協会のリストはミステリー、SFマガジン3回総合は日本のSFと邦訳のあるSFだけ、ニューヨーク・タイムズは2000年以降の作品だけが対象です。そのため『戦争と平和』はTIMEに、ミステリーは文学リストに載っていなくても、もう一方の群で評価されます。リストは、ある程度の期間の全作品から選んだオールタイムベスト型のものに限り、賞の受賞作や1年単位のランキングは使っていません。</p>
+      <p>「SFマガジン オールタイムベスト 3回総合」は、2006・2014・2025年の3回の投票（各回 海外・国内の長篇上位50）を独自に1本にまとめたものです。各回の得点は1位を1.0、50位を0.5とし、投票の時点で発表済み（海外作品は邦訳の期間を見て発表から3年以上）なのに入らなかった回は0点で数えます。総合点は「得点の合計 ÷（対象だった回数＋0.5）」です。何度も入った作品ほど、また順位が高いほど上位になり、最近の作品が古い投票に入っていないことは減点しません。</p>
+      <p>「ファンタジー・ベスト100 2種総合」はプリングル（1946–87年の英語作品）とカウソーン＆ムアコック（古典から1987年まで）の2冊の選書を、「ホラー・ベスト200」は1988年版と2005年の続編を、それぞれ1本にまとめたものです。どちらかに選ばれていれば掲載とし、同じ選者団の重複で点が二重にならないようにしています。</p>
+      <p>ジャンルは、そのジャンルの専門リストに載った作品に付けています（ホラーは手作業）。『罪と罰』がアメリカ探偵作家クラブの100冊に入っているように、文学作品にジャンルが付くこともあります。同点のときは掲載数、次にリスト内の順位で並べています。</p>
+      <p>1001冊は2006–2018年の全版の掲載作から、詩・戯曲・評論・ノンフィクションを除いています。ハリー・ポッター、ナルニア国物語、ライラの冒険、氷と炎の歌、時の車輪、ミレニアムなどはシリーズで1作として数えています。</p>
+      <p>邦題・著者名・発表年・邦訳の有無はClaudeが知識に基づいて付けたもので、確認しきれていない作品があります。特に「邦訳なし」は「見つからなかった」の意味です。TIMEとガーディアン(2015)は元ページを取得できなかったため、公表済みの一覧を知識から再構成し、一部を他サイトで照合しました。</p>
+    </div>
+  </details>
+
+  <details class="box" id="myBox">
+    <summary>リストを自分で追加する</summary>
+    <div class="bk my">
+      <p class="msg" style="margin:0">書籍や雑誌にしか載っていないリストを手で入力して、集計に加えられます。追加したリストはほかのリストと同じ計算でスコアに反映され、記録と一緒にアカウントへ保存されます。</p>
+      <div class="mylist" id="myLists"></div>
+      <div class="fg">
+        <label>リスト名<input id="mName" placeholder="例：〇〇誌 オールタイムベスト100"></label>
+        <label>出典・メモ<input id="mNote" placeholder="例：『〇〇』〇〇社 2009年 所収"></label>
+      </div>
+      <div class="fg">
+        <label>群<select id="mKind"><option value="lit">文学・名作</option><option value="pop">読者投票</option><option value="genre" selected>ジャンル・国内専門</option></select></label>
+        <label>順位<select id="mRanked"><option value="1">順位あり</option><option value="0">順位なし</option></select></label>
+        <label>対象の国<select id="mCty"><option value="all">すべての国</option><option value="jp">日本の作品のみ</option><option value="foreign">海外の作品のみ</option><option value="en">英語圏の作品のみ</option><option value="none">決めない（載っていない作品を減点しない）</option></select></label>
+        <label>対象のジャンル<select id="mGn"><option value="">指定なし</option><option value="M">ミステリー</option><option value="SF">SF</option><option value="F">ファンタジー</option><option value="H">ホラー</option></select></label>
+        <label>対象の発表年<span class="yr2"><input id="mY0" inputmode="numeric" placeholder="から"> – <input id="mY1" inputmode="numeric" placeholder="まで"></span></label>
+      </div>
+      <label class="full">作品（1行に1作品。「順位|書名|著者」の形で、順位と著者は省略できます。区切りはタブでも構いません。書名は邦題でも原題でも照合します）<textarea id="mItems" spellcheck="false" placeholder="1|火車|宮部みゆき&#10;2|ソラリス|レム&#10;3|The Name of the Rose|Eco"></textarea></label>
+      <div class="row2"><button class="btn pri" id="mMatch">照合する</button><button class="btn" id="mReset">入力を消す</button><span class="msg" id="mMsg"></span></div>
+      <div id="mPrev"></div>
+      <p class="msg" style="margin:0">対象の国・ジャンル・発表年は「このリストに載る資格がある作品」の範囲です。範囲内で載っていない作品は、ほかのリストと同じように割合が下がります。ジャンルを指定したジャンル群のリストに載った作品には、そのジャンルが付きます。新しく追加した作品は、元からあるリストでは対象外として扱います。</p>
+    </div>
+  </details>
+
+  <details class="box" id="logBox">
+    <summary>読書記録の取り込み（ブクログなど）</summary>
+    <div class="bk my">
+      <p class="msg" style="margin:0">ブクログの「データ出力」で書き出したCSVを読み込むと、一覧にある作品に自動で読了の印を付けます。読み込んだ記録はリストとは別に保存しておくので、あとでリストや作品が増えたときも、記録に該当する作品が出てくれば自動で印が付きます。見出し行に「タイトル（書名）」「著者」の列があるCSVも読み込めます。</p>
+      <div class="row2"><input type="file" id="logFile" accept=".csv,text/csv"><span class="msg" id="logMsg"></span></div>
+      <div id="logInfo"></div>
+    </div>
+  </details>
+
+  <details class="box">
+    <summary>記録のバックアップ</summary>
+    <div class="bk">
+      <p class="msg" style="margin:0">読了記録・読みたい印・所有の印・自分で追加したリストを文字列で書き出せます。別の場所に貼って保管し、必要なときに下の欄へ貼り付けて読み込んでください。</p>
+      <div class="row2"><button class="btn" id="bkOut">書き出す</button><button class="btn" id="bkCopy">コピー</button></div>
+      <textarea id="bkText" aria-label="バックアップの文字列" spellcheck="false"></textarea>
+      <div class="row2"><button class="btn" id="bkIn">貼り付けた内容を読み込む</button><span class="msg" id="bkMsg"></span></div>
+    </div>
+  </details>
+</div>
+
+
+
+<script src="app/store.js"></script>
+<script>
+"use strict";
+(async () => {
+  const CFG = {"title": "必読書チェッカー — shelf", "works": "works/novels.json", "docs": {"books": "records/novels-checker/books.json", "custom": "records/novels-checker/custom.json", "log": "records/novels-checker/log.json"}, "logchunks": "records/novels-checker/log-{n}.json", "code": "app/legacy-novels.js"};
+  const bar = document.getElementById("shelfBar");
+  const msg = t => { const el = document.getElementById("shelfMsg"); if (el) { el.textContent = t; el.hidden = !t; } };
+  // 保存の状態
+  const pill = document.getElementById("shelfSync");
+  Shelf.onStatus(s => {
+    const m = { ok: "保存済み", idle: "準備中", syncing: s.msg || "通信中", pending: `送信待ち ${s.pending}件`, offline: s.pending ? `電波なし・送信待ち ${s.pending}件` : "電波なし", error: "保存できていません", notoken: "鍵が未設定" };
+    pill.textContent = m[s.state] || s.state; pill.dataset.state = s.state; pill.title = s.msg || "";
+  });
+  if (!Shelf.token()) { msg("鍵が設定されていません。ホームで鍵を入れてください。"); return; }
+  msg("記録を読み込んでいます…");
+  await Shelf.init();
+  if (!Shelf.read(CFG.works)) await Shelf.refresh();
+  const data = Shelf.read(CFG.works);
+  if (!data) { msg("作品データを読み込めませんでした。電波と鍵を確かめてください。"); return; }
+  msg("");
+  window.__DATA__ = JSON.parse(JSON.stringify(data));
+  const docPath = full => {
+    const id = full.split("/").pop();
+    if (CFG.docs[id]) return CFG.docs[id];
+    const m = id.match(/^log-(\d+)$/); if (m && CFG.logchunks) return CFG.logchunks.replace("{n}", m[1]);
+    return "records/misc/" + id + ".json";
+  };
+  const biblio = () => {
+    const b = Shelf.read("works/novels-biblio.json"); if (!b) return null;
+    return { ver: (b.last || "") + ":" + Object.keys(b.fix || {}).length + ":" + Object.keys(b.checked || {}).length, fixDocs: ["fix"], last: b.last, checked: b.checked };
+  };
+  window.claude = Shelf.legacyClaude({
+    docPath,
+    virtual: {
+      "biblio/meta": biblio,
+      "biblio/fix": () => { const b = Shelf.read("works/novels-biblio.json"); return b ? { items: b.fix || {} } : null; },
+    },
+    virtualSource: { "biblio/meta": "works/novels-biblio.json" },
+  });
+  const s = document.createElement("script"); s.src = CFG.code; document.body.appendChild(s);
+})();
+</script>
+
+</body>
+</html>

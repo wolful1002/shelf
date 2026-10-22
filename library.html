@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>蔵書 — shelf</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="app/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app/ui.css">
+<style>
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tabs a{text-decoration:none;color:var(--muted);padding:6px 10px;border-radius:8px;font-size:14px;border:1px solid var(--line);background:var(--card)}
+.tabs a[aria-current="true"]{background:var(--fg);color:var(--card);border-color:var(--fg)}
+.tabs .n{font-size:11px;margin-left:4px}
+.panel[hidden]{display:none}
+.cover{width:44px;height:62px;object-fit:cover;border-radius:3px;background:var(--soft)}
+.li-wrap{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center}
+.chip{all:unset;cursor:pointer;border-bottom:1px dotted var(--muted)}
+.chip:focus-visible{outline:2px solid var(--accent)}
+.backbtn{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom));z-index:40;border-radius:99px;background:var(--fg);color:var(--card);border-color:var(--fg)}
+.labels{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.labels figure{margin:0;background:#fff;color:#000;border:1px dashed #999;border-radius:6px;padding:8px;text-align:center;break-inside:avoid}
+.labels svg{max-width:100%;height:auto}
+.labels figcaption{font-size:13px;font-weight:700}
+@media print{
+  body.printing .wrap>*:not(#printArea){display:none!important}
+  body.printing #printArea{display:block!important}
+  .labels figure{border:1px dashed #999}
+}
+#printArea{display:none}
+.qitem{border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:8px}
+.cands{display:grid;gap:6px}
+.cands button{justify-content:flex-start;text-align:left;font-weight:500;border-color:var(--line);background:var(--card)}
+</style>
+</head>
+<body>
+<main class="wrap" id="main">
+  <div class="row"><h1 class="grow">蔵書</h1></div>
+  <nav class="tabs noprint" aria-label="蔵書の画面">
+    <a href="#register" data-tab="register">登録</a>
+    <a href="#list" data-tab="list">一覧</a>
+    <a href="#queue" data-tab="queue">確認待ち<span class="n" id="qCount"></span></a>
+    <a href="#stats" data-tab="stats">集計</a>
+    <a href="#places" data-tab="places">保管場所</a>
+    <a href="#booklog" data-tab="booklog">ブクログから</a>
+    <a href="#off" data-tab="off">外した本</a>
+  </nav>
+
+  <!-- 登録 -->
+  <section class="panel card" id="p-register" aria-label="登録">
+    <div class="row">
+      <div class="seg" role="group" aria-label="登録のしかた"><button type="button" id="mNow" aria-pressed="true">読むたび即登録</button><button type="button" id="mBatch" aria-pressed="false">ためて後で確認</button></div>
+      <div class="seg" role="group" aria-label="紙か電子か"><button type="button" id="mdPaper" aria-pressed="true">紙</button><button type="button" id="mdEbook" aria-pressed="false">電子</button></div>
+    </div>
+    <div class="row">
+      <label class="f grow">今の保管場所（場所ラベルを読むと切り替わります）<select id="curLoc"></select></label>
+    </div>
+    <div class="row">
+      <button type="button" id="camBtn">カメラで読む</button>
+      <button type="button" id="camStop" class="quiet" hidden>カメラを止める</button>
+      <span class="pill" id="engine" hidden></span>
+    </div>
+    <div class="video" id="videoBox" hidden><video id="video" playsinline muted></video><div class="guide" aria-hidden="true"></div></div>
+    <input type="text" id="scanIn" inputmode="numeric" autocomplete="off" placeholder="ここをクリックしてからスキャナーで読む（ISBNを入れてEnterでも可）" aria-label="バーコードの番号">
+    <p class="small muted">上段（978…）で登録し、続けて下段（192…）を読むと、本の種類と判型がより正確になります。同じ本を読むと「所持済み」と出ます。</p>
+    <div id="batchBox" hidden class="card" style="background:var(--bg)">
+      <div class="row"><h3 class="grow">ためた番号 <span id="batchN"></span></h3><button type="button" id="batchReg">まとめて登録</button><button type="button" class="quiet" id="batchClear">すべて消す</button></div>
+      <ul class="list" id="batchList"></ul>
+    </div>
+    <h3>読み取りの記録</h3>
+    <div class="log" id="regLog"><p class="muted small">まだありません</p></div>
+    <details>
+      <summary>書名で探して登録する</summary>
+      <div class="row" style="margin-top:8px"><input type="search" id="tq" class="grow" placeholder="書名（著者名を足すと絞れます）" aria-label="書名で探す"><button type="button" id="tqBtn">探す</button></div>
+      <ul class="list" id="tqList"></ul>
+    </details>
+    <details>
+      <summary>手で入力して登録する</summary>
+      <div class="grid2" style="margin-top:8px">
+        <label class="f">書名<input type="text" id="mt"></label>
+        <label class="f">著者<input type="text" id="ma"></label>
+        <label class="f">種類<select id="mc"></select></label>
+        <label class="f">出版社<input type="text" id="mp"></label>
+      </div>
+      <div class="row" style="margin-top:8px"><button type="button" id="mSave">登録する</button></div>
+    </details>
+  </section>
+
+  <!-- 一覧 -->
+  <section class="panel card" id="p-list" aria-label="一覧" hidden>
+    <div class="row">
+      <input type="search" id="q" class="grow" placeholder="書名・著者・出版社・ISBN・保管場所" aria-label="検索">
+      <select id="sort" aria-label="並び順">
+        <option value="added">登録が新しい順</option><option value="title">書名順</option><option value="author">著者順</option>
+        <option value="pub">出版社順</option><option value="loc">保管場所順</option><option value="year">刊行年順</option>
+      </select>
+    </div>
+    <div class="row">
+      <select id="fCat" aria-label="種類"></select>
+      <select id="fMedia" aria-label="紙か電子か"><option value="">紙・電子</option><option value="paper">紙</option><option value="ebook">電子</option></select>
+      <select id="fLoc" aria-label="保管場所"></select>
+      <select id="fRead" aria-label="読書の状況"><option value="">読書：すべて</option><option value="unread">未読</option><option value="read">読了</option></select>
+      <select id="fLink" aria-label="チェッカーとの結び付き"><option value="">結び付き：すべて</option><option value="yes">必読書あり</option><option value="wait">確認待ち</option><option value="no">なし</option></select>
+    </div>
+    <p class="small muted" id="listCount"></p>
+    <ul class="list" id="list"></ul>
+    <div class="row" style="justify-content:center"><button type="button" class="quiet" id="more" hidden>さらに表示</button></div>
+  </section>
+
+  <!-- 確認待ち -->
+  <section class="panel card" id="p-queue" aria-label="確認待ち" hidden>
+    <p class="small muted">迷ったものだけがここに並びます。どれもあなたが決めるまで記録は確定しません。</p>
+    <div id="qList" style="display:grid;gap:10px"></div>
+  </section>
+
+  <!-- 集計 -->
+  <section class="panel card" id="p-stats" aria-label="集計" hidden><div id="stats"></div></section>
+
+  <!-- 保管場所 -->
+  <section class="panel card" id="p-places" aria-label="保管場所" hidden>
+    <p class="small muted">保管場所を作るとラベルの番号が決まります。ラベルを印刷して棚に貼り、登録のときに先に読むと、続けて読んだ本にその場所が入ります。</p>
+    <div class="row"><input type="text" id="newPlace" class="grow" placeholder="例：書斎・本棚A・1段目" aria-label="新しい保管場所"><button type="button" id="addPlace">追加</button></div>
+    <ul class="list" id="placeList"></ul>
+    <div class="row"><button type="button" id="printLabels">ラベルを印刷する</button></div>
+  </section>
+
+  <!-- ブクログ -->
+  <section class="panel card" id="p-booklog" aria-label="ブクログから" hidden>
+    <p class="small muted">必読書チェッカーに取り込んであるブクログの記録から、持っている本を選んで蔵書に登録します。登録済みのものは出ません。</p>
+    <div class="row"><input type="search" id="blq" class="grow" placeholder="書名・著者で絞る" aria-label="ブクログの記録を絞る"><button type="button" id="blReg">選んだ本を登録</button></div>
+    <p class="small muted" id="blCount"></p>
+    <ul class="list" id="blList"></ul>
+    <div class="row" style="justify-content:center"><button type="button" class="quiet" id="blMore" hidden>さらに表示</button></div>
+  </section>
+
+  <!-- 外した本 -->
+  <section class="panel card" id="p-off" aria-label="外した本" hidden>
+    <p class="small muted">所有を外した本と、手放した本です。記録は消さずに残してあり、いつでも所有に戻せます。</p>
+    <ul class="list" id="offList"></ul>
+  </section>
+
+  <div id="printArea"><div class="labels" id="labels"></div></div>
+</main>
+<button type="button" class="backbtn noprint" id="backBtn" hidden>← 元の表示に戻る</button>
+
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<script src="app/store.js"></script>
+<script src="app/biblio.js"></script>
+<script src="app/scan.js"></script>
+<script src="app/ui.js"></script>
+<script src="app/lib.js"></script>
+<script src="app/library.js"></script>
+</body>
+</html>

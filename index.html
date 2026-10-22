@@ -4,22 +4,139 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>shelf</title>
-<style>
-:root{--bg:#f4f3ef;--fg:#22231f;--muted:#68695f;--accent:#3b5a7a;color-scheme:light}
-@media (prefers-color-scheme:dark){:root{--bg:#171816;--fg:#e7e8e2;--muted:#a0a397;--accent:#8fb3d9;color-scheme:dark}}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.7 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
-  padding:max(24px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
-main{max-width:640px;margin:0 auto}
-h1{font-size:24px;margin:0 0 8px}
-p{color:var(--muted)}
-a{color:var(--accent);font-weight:600}
-</style>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="app/icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#365a7c">
+<link rel="stylesheet" href="app/ui.css">
 </head>
 <body>
-<main>
-  <h1>shelf</h1>
-  <p>鑑賞・蔵書記録アプリ。現在は試作の段階です。</p>
-  <p><a href="proto/">試作ページを開く</a></p>
+<main class="wrap" id="main">
+  <section class="card" id="checkCard" aria-labelledby="checkH">
+    <div class="row"><h2 id="checkH" class="grow">所持確認</h2><a class="btn quiet small" href="library.html#register">登録の画面へ</a></div>
+    <p class="small muted">バーコードを読むと、持っているかどうかをすぐ表示します。ここでは登録はしません。</p>
+    <div class="row">
+      <button type="button" id="camBtn">カメラで読む</button>
+      <button type="button" id="camStop" class="quiet" hidden>カメラを止める</button>
+      <span class="pill" id="engine" hidden></span>
+    </div>
+    <div class="video" id="videoBox" hidden><video id="video" playsinline muted></video><div class="guide" aria-hidden="true"></div></div>
+    <input type="text" id="scanIn" inputmode="numeric" autocomplete="off" placeholder="スキャナーで読む・ISBNを入れてEnter" aria-label="バーコードの番号">
+    <div id="result" aria-live="polite"></div>
+  </section>
+
+  <section class="card" aria-labelledby="qH">
+    <div class="row"><h2 id="qH" class="grow">確認待ちとお知らせ</h2><a class="btn quiet small" href="library.html#queue">確認待ちを開く</a></div>
+    <div id="notices"><p class="muted small">読み込み中…</p></div>
+  </section>
+
+  <section class="card" aria-labelledby="navH">
+    <h2 id="navH">画面</h2>
+    <div class="row">
+      <a class="btn" href="library.html">蔵書</a>
+      <a class="btn" href="novels.html">必読書チェッカー</a>
+      <a class="btn" href="films.html">映画チェッカー</a>
+      <button type="button" class="quiet" id="keyEdit">鍵を入れ直す</button>
+    </div>
+  </section>
 </main>
+
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="app/store.js"></script>
+<script src="app/biblio.js"></script>
+<script src="app/scan.js"></script>
+<script src="app/ui.js"></script>
+<script src="app/lib.js"></script>
+<script>
+"use strict";
+const { $, esc } = UI;
+UI.topbar("index.html");
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+
+$("keyEdit").onclick = () => { $("main").prepend(UI.keyCard()); window.scrollTo(0, 0); };
+
+(async () => {
+  if (!Shelf.token()) { $("main").prepend(UI.keyCard()); $("notices").innerHTML = `<p class="small muted">鍵を設定すると表示されます。</p>`; return; }
+  await Shelf.init();
+  const ready = () => { const n = Shelf.read(Lib.P.novels), f = Shelf.read(Lib.P.films); if (n) Biblio.setNovels(n); if (f) Biblio.setFilms(f); };
+  ready(); Shelf.on(Lib.P.novels, ready); Shelf.on(Lib.P.films, ready);
+  Lib.reconcile();
+  renderNotices();
+  Shelf.onAny(p => { if (/records\/(queue|library|novels-checker)/.test(p)) renderNotices(); });
+  Shelf.onStatus(() => renderNotices());
+})();
+
+const QNAME = { link: "チェッカーとの結び付け", cat: "本の種類", bib: "書誌が見つからない本", check: "書誌の確認", unowned: "所有を外した本" };
+function renderNotices() {
+  const q = Object.values(Lib.queue());
+  const by = {}; q.forEach(x => by[x.type] = (by[x.type] || 0) + 1);
+  const st = Shelf.status();
+  const items = Object.values(Lib.items());
+  const own = items.filter(x => x.st === "own");
+  const rows = [];
+  rows.push(q.length ? `<p><span class="pill warn">確認待ち ${q.length}件</span> ${Object.entries(by).map(([k, n]) => `${esc(QNAME[k] || k)} ${n}件`).join("・")}</p>` : `<p><span class="pill ok">確認待ちはありません</span></p>`);
+  if (st.pending) rows.push(`<p><span class="pill warn">送信待ち ${st.pending}件</span> 電波が戻ると自動で送ります</p>`);
+  if (st.state === "error") rows.push(`<p><span class="pill ng">保存の問題</span> ${esc(st.msg)}</p>`);
+  rows.push(`<p class="small muted">蔵書 ${own.length}件（うち積読 ${own.filter(Lib.isUnreadOwned).length}件）</p>`);
+  $("notices").innerHTML = rows.join("");
+}
+
+// ---------- 所持確認 ----------
+let stopCam = null;
+$("camBtn").onclick = async () => {
+  $("videoBox").hidden = false; $("camBtn").hidden = true; $("camStop").hidden = false;
+  try { stopCam = await Scan.startCamera($("video"), onCode, e => { $("engine").hidden = false; $("engine").textContent = "読み取り：" + e; }); }
+  catch (e) { UI.toast("カメラを使えません：" + (e.name || e.message)); $("camStop").onclick(); }
+};
+$("camStop").onclick = () => { if (stopCam) stopCam(); stopCam = null; $("videoBox").hidden = true; $("camBtn").hidden = false; $("camStop").hidden = true; $("engine").hidden = true; };
+Scan.bindInput($("scanIn"), onCode);
+
+let busy = 0;
+async function onCode(code) {
+  const c = Biblio.classify(code);
+  if (c.kind === "lower") { Scan.beep("warn"); show(`<div class="result warn"><div class="big">下段のバーコードです</div><p>上段（978で始まる方）を読んでください。</p></div>`); return; }
+  if (c.kind === "label") { Scan.beep("warn"); show(`<div class="result warn"><div class="big">場所ラベル</div><p>${esc(Lib.places()[c.code] || "未登録のラベル")}</p></div>`); return; }
+  if (c.kind === "bad" || c.kind === "other") { Scan.beep("ng"); show(`<div class="result warn"><div class="big">本のバーコードではありません</div><p class="mono small">${esc(code)}</p></div>`); return; }
+  const my = ++busy;
+  show(`<div class="result"><p>調べています…</p></div>`);
+  const r = await Lib.check(c.code);
+  if (my !== busy) return;
+  if (r.owned) {
+    Scan.beep("dup");
+    const it = r.item;
+    const vol = r.vol != null ? `${r.vol}巻` : "";
+    const read = r.vol != null ? (it.vols?.[r.vol]?.read ? "読了" : "未読") : (Lib.isRead(it) ? "読了" : "未読");
+    show(`<div class="result own"><div class="big">持っています</div><p><b>${esc(it.t)}</b> ${esc(vol)}</p>
+      <p class="small">${esc(it.loc || "保管場所は未設定")}・${esc(it.media === "ebook" ? "電子" : "紙")}・${read}${it.st !== "own" ? `・<span class="pill warn">${it.st === "gone" ? "手放した" : "所有を外した"}</span>` : ""}</p></div>`);
+    return;
+  }
+  Scan.beep("ok");
+  if (c.kind === "magazine") { show(`<div class="result none"><div class="big">持っていません</div><p>雑誌コード ${esc(c.mag)}・${c.month}月号</p></div>`); return; }
+  const b = r.bib;
+  const extra = [];
+  if (r.series) {
+    const owned = Object.entries(r.series.vols || {}).filter(([, v]) => v.own).map(([n]) => +n).sort((a, b) => a - b);
+    extra.push(`<p>シリーズ『${esc(r.series.t)}』は ${owned.length}冊所持（${esc(rangeText(owned))}）。この${r.vol}巻は持っていません。</p>`);
+  }
+  if (r.sameTitle?.length) extra.push(`<p><span class="pill warn">同じ書名の本を所持</span> 別の版かもしれません（${esc(r.sameTitle.map(x => x.pub || x.fmt || "版不明").join("、"))}）</p>`);
+  if (r.work) extra.push(`<p><span class="pill acc">必読書</span> ${esc(Biblio.tierNm(r.work.sc))}（スコア${Math.round(r.work.sc)}）${r.workRead ? "・読了済み" : ""}</p>`);
+  if (r.films?.length) extra.push(`<p><span class="pill acc">映画化あり</span> ${r.films.slice(0, 3).map(f => esc(`『${f.t}』(${f.y})`)).join("、")}</p>`);
+  show(`<div class="result none"><div class="big">持っていません</div>
+    ${b ? `<p><b>${esc(b.t)}</b></p><p class="small">${esc(b.a)}・${esc(b.pub)}${b.y ? "・" + b.y : ""}</p>` : `<p>書誌が見つかりませんでした（${esc(c.code)}）</p>`}
+    ${extra.join("")}
+    <div class="row"><button type="button" id="regNow">この本を登録する</button></div></div>`);
+  $("regNow").onclick = async () => {
+    const res = await Lib.register({ isbn: c.code, bib: b, src: "camera" });
+    UI.toast(res.status === "vol" ? `『${res.item.t}』${res.vol}巻を登録しました` : `『${res.item.t}』を登録しました`);
+    $("regNow").disabled = true; $("regNow").textContent = "登録しました";
+  };
+}
+function show(html) { $("result").innerHTML = html; }
+function rangeText(nums) {
+  if (!nums.length) return "なし";
+  const out = []; let s = nums[0], p = nums[0];
+  for (const n of nums.slice(1).concat([null])) { if (n === p + 1) { p = n; continue; } out.push(s === p ? `${s}` : `${s}〜${p}`); s = p = n; }
+  return out.join("、") + "巻";
+}
+</script>
 </body>
 </html>

@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>映画チェッカー — shelf</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="app/icon.svg" type="image/svg+xml">
+</head>
+<body>
+
+
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a viewing ledger — summary strip, then one long reel of rows; each row carries a 14-frame strip showing which lists include the film */
+:root{
+  --bg:#eef0ee; --paper:#fbfcfa; --ink:#1d2421; --muted:#5f6b66; --line:#d5dbd7;
+  --accent:#c2410c; --accent-soft:#fbe3d6; --done:#2f6b4f; --done-soft:#dcebe2;
+  --frame-off:#e3e7e4; --frame-on:#2b3430;
+  --display:"Shippori Mincho B1","Hiragino Mincho ProN","Yu Mincho",serif;
+  --body:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#141917; --paper:#1b211e; --ink:#e7ece9; --muted:#9aa7a1; --line:#2e3833;
+  --accent:#f08a4b; --accent-soft:#3a2418; --done:#7cc6a0; --done-soft:#1c3328;
+  --frame-off:#28302c; --frame-on:#d8e0dc; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141917; --paper:#1b211e; --ink:#e7ece9; --muted:#9aa7a1; --line:#2e3833;
+  --accent:#f08a4b; --accent-soft:#3a2418; --done:#7cc6a0; --done-soft:#1c3328;
+  --frame-off:#28302c; --frame-on:#d8e0dc; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.6;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 64px}
+.wrap{max-width:1040px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+header{display:grid;grid-template-columns:1fr auto;gap:20px;align-items:end}
+@media (max-width:700px){header{grid-template-columns:1fr}}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--display);font-weight:800;font-size:clamp(30px,6vw,52px);line-height:1.15;margin:6px 0 10px;text-wrap:balance}
+.lede{margin:0;color:var(--muted);max-width:62ch}
+.meter{font-family:var(--mono);text-align:right}
+@media (max-width:700px){.meter{text-align:left}}
+.meter .big{font-size:clamp(40px,8vw,64px);line-height:1;font-weight:500;font-variant-numeric:tabular-nums}
+.meter .big small{font-size:.38em;color:var(--muted)}
+.meter .sync{font-size:12px;color:var(--muted);margin-top:6px}
+.meter .sync b{font-weight:500;color:var(--done)}
+.bar{height:6px;background:var(--frame-off);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--done);width:0;transition:width .4s}
+
+.tiers{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+@media (max-width:760px){.tiers{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tier{all:unset;cursor:pointer;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.tier:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tier[aria-pressed="true"]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.tier .lbl{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.tier .nm{font-weight:700;font-size:14px}
+.tier .rng{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
+.tier .ct{font-family:var(--mono);font-size:20px;font-variant-numeric:tabular-nums}
+.tier .ct small{font-size:12px;color:var(--muted)}
+
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:10px;border-bottom:1px solid var(--line)}
+@media (max-width:640px){.controls{position:static}}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.controls input[type=search],.controls select{font:inherit;font-size:14px;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-width:0}
+.controls input[type=search]{flex:1 1 220px}
+.controls select{flex:0 1 auto;max-width:100%}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--paper)}
+.seg button{all:unset;cursor:pointer;padding:8px 12px;font-size:13px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.count{font-family:var(--mono);font-size:12px;color:var(--muted);margin-left:auto}
+
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+.legend span{display:inline-flex;gap:6px;align-items:center}
+.legend code{font-family:var(--mono);font-size:11px;background:var(--paper);border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--ink)}
+
+ol.reel{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border-top:1px solid var(--line)}
+.row{display:grid;grid-template-columns:40px 52px minmax(0,1fr) auto;gap:4px 14px;align-items:center;padding:12px 4px;border-bottom:1px solid var(--line)}
+.row{content-visibility:auto;contain-intrinsic-size:auto 92px}
+.row.done{background:var(--done-soft)}
+@media (max-width:640px){.row{grid-template-columns:36px minmax(0,1fr) auto;}.row .no{display:none}.row .strip{grid-column:2/4}}
+.chk{all:unset;cursor:pointer;width:28px;height:28px;border:1.5px solid var(--muted);border-radius:5px;display:grid;place-items:center;background:var(--paper)}
+.chk:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.chk svg{width:16px;height:16px;opacity:0}
+.done .chk{background:var(--done);border-color:var(--done)}
+.done .chk svg{opacity:1;color:var(--paper)}
+.no{font-family:var(--mono);font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
+.ttl{min-width:0}
+.ttl a{color:var(--ink);text-decoration:none;font-family:var(--display);font-weight:600;font-size:17px;line-height:1.35}
+.ttl a:hover{text-decoration:underline;text-decoration-color:var(--accent)}
+.done .ttl a{color:var(--muted)}
+.sub{font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:2px 10px}
+.sub .yr{font-family:var(--mono)}
+.sub .when{color:var(--done);font-family:var(--mono)}
+.lk{all:unset;cursor:pointer;color:inherit;border-bottom:1px dotted var(--muted)}
+.lk:hover{color:var(--accent);border-bottom-color:var(--accent)}
+.lk:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.lk.on{color:var(--accent);border-bottom-style:solid}
+li.grp{padding:14px 4px 6px;font-weight:700;font-size:14px;border-bottom:1px solid var(--ink);display:flex;gap:10px;align-items:baseline}
+li.grp small{font-weight:400;color:var(--muted);font-family:var(--mono);font-size:12px}
+.row.flash{box-shadow:inset 3px 0 0 var(--accent)}
+.backbtn{all:unset;cursor:pointer;position:fixed;z-index:20;left:50%;transform:translateX(-50%);
+  bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);font-size:14px;font-weight:500;
+  padding:10px 18px;border-radius:999px;box-shadow:0 4px 18px rgba(0,0,0,.25);white-space:nowrap;max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis}
+.backbtn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.score{font-family:var(--mono);font-size:12px;text-align:right;white-space:nowrap}
+.score b{display:block;font-size:20px;font-weight:500;line-height:1}
+.score.hi b{color:var(--accent)}
+.strip{display:flex;gap:2px;grid-column:3/4}
+.strip i{width:14px;height:10px;border-radius:2px;background:var(--frame-off)}
+.strip i.on{background:var(--frame-on)}
+.strip i.base.on{background:var(--accent)}
+.jp{font-size:11px;padding:0 6px;border-radius:3px;border:1px solid var(--line);white-space:nowrap}
+.jp.J{color:var(--done);border-color:var(--done)}
+.jp.F{color:var(--accent);border-color:var(--accent)}
+.jp.N{color:var(--paper);background:var(--muted);border-color:var(--muted)}
+.unsure{color:var(--accent)}
+.svc-tags{display:inline-flex;gap:4px;flex-wrap:wrap}
+.svc-tags span{font-size:11px;background:var(--ink);color:var(--bg);border-radius:3px;padding:0 5px}
+.disc-tag{font-size:11px;border:1px dashed var(--muted);border-radius:3px;padding:0 5px}
+.open{all:unset;cursor:pointer;font-size:12px;color:var(--muted);text-decoration:underline;text-underline-offset:3px}
+.open:focus-visible{outline:2px solid var(--accent)}
+.detail{grid-column:1/-1;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:14px 16px;margin-top:8px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 24px}
+@media (max-width:640px){.detail{grid-template-columns:1fr}}
+.detail h4{margin:0 0 6px;font-size:12px;letter-spacing:.08em;color:var(--muted);font-weight:500}
+.detail dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px}
+.detail dt{color:var(--muted)} .detail dd{margin:0;min-width:0}
+.pills{display:flex;flex-wrap:wrap;gap:6px}
+.pill{all:unset;cursor:pointer;font-size:12.5px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:var(--bg)}
+.pill[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.pill:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.links{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px}
+.links a{color:var(--accent)}
+.note{font-size:12px;color:var(--muted);margin:6px 0 0}
+.addlists{display:flex;flex-direction:column;gap:18px;margin-top:14px}
+.pend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media (max-width:700px){.pend{grid-template-columns:1fr}}
+.pcard{border:1px solid var(--line);border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:var(--bg);min-width:0}
+.pcard .pn{font-weight:700;font-size:14px}
+.pcard .pm{font-size:12.5px;color:var(--muted)}
+.pcard .ph{font-size:13px}
+.pcard .pf{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:auto}
+.st{font-size:11px;padding:0 6px;border-radius:3px;border:1px solid currentColor;white-space:nowrap}
+.st.web{color:var(--done)} .st.book{color:var(--accent)} .st.browser{color:var(--muted)}
+.btn{all:unset;cursor:pointer;font-size:13px;padding:6px 12px;border:1px solid var(--ink);border-radius:6px;background:var(--paper)}
+.btn.pri{background:var(--ink);color:var(--bg)}
+.btn.warn{border-color:var(--accent);color:var(--accent)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn[disabled]{opacity:.4;cursor:default}
+.form{display:grid;gap:10px;border:1px solid var(--line);border-radius:6px;padding:14px;background:var(--bg)}
+.form label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.form input[type=text],.form textarea{font:inherit;font-size:14px;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%;min-width:0}
+.form textarea{min-height:180px;font-family:var(--mono);font-size:13px;line-height:1.5}
+.form .chkline{flex-direction:row;align-items:center;gap:8px;color:var(--ink);font-size:13px}
+.form .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:640px){.form .row2{grid-template-columns:1fr}}
+.preview{font-size:13px;display:flex;flex-direction:column;gap:8px}
+.preview .sum{font-weight:700}
+.preview ul{margin:0;padding-left:18px;max-height:260px;overflow:auto}
+.preview li{margin:2px 0}
+.preview .tag{font-size:11px;border-radius:3px;padding:0 5px;margin-right:6px}
+.tag.ok{background:var(--done-soft);color:var(--done)} .tag.guess{background:var(--accent-soft);color:var(--accent)} .tag.new{background:var(--frame-off);color:var(--ink)}
+.mine{display:flex;flex-direction:column;gap:8px}
+.mrow{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;border:1px solid var(--line);border-radius:6px;padding:10px 12px;background:var(--bg)}
+.mrow .mn{font-weight:700;flex:1 1 220px;min-width:0}
+.mrow .mm{font-size:12px;color:var(--muted)}
+.strip i.cu.on{background:var(--done)}
+.h3{font-size:14px;font-weight:700;margin:0}
+.offl{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;border-top:1px solid var(--line)}
+.offl li{display:flex;gap:10px;align-items:baseline;padding:6px 2px;border-bottom:1px solid var(--line);font-size:13.5px;flex-wrap:wrap}
+.offl .ot{flex:1 1 200px;min-width:0}
+.offl .od{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.offl button{all:unset;cursor:pointer;font-size:12px;color:var(--muted);text-decoration:underline}
+.mm{font-size:12px;color:var(--muted);font-weight:400}
+.more{all:unset;cursor:pointer;align-self:center;font-size:14px;padding:10px 18px;border:1px solid var(--ink);border-radius:6px}
+.more:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.empty{padding:40px 0;text-align:center;color:var(--muted)}
+
+details.sources{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:14px 18px}
+details.sources summary{cursor:pointer;font-weight:700}
+.srcs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 24px;margin-top:14px}
+@media (max-width:640px){.srcs{grid-template-columns:1fr}}
+.src{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:10px;align-items:start;font-size:13px}
+.src .k{font-family:var(--mono);font-size:11px;color:var(--muted);padding-top:2px}
+.src a{color:var(--ink)}
+.src .nt{color:var(--muted);font-size:12px}
+.src .pg{font-family:var(--mono);font-size:12px;white-space:nowrap;color:var(--muted)}
+.method{font-size:13px;color:var(--muted);max-width:70ch;margin:14px 0 0}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+.txsel{font:inherit;font-size:14px;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-width:0;width:100%}
+#txOut{min-height:260px;white-space:pre;overflow:auto}
+/* streaming survey tags, want marks */
+.vod{font-size:11px;border-radius:3px;padding:0 5px;border:1px solid var(--done);color:var(--done);white-space:nowrap}
+.vod.r{border-color:var(--muted);color:var(--muted)}
+.vod.x{border:1px dashed var(--line);color:var(--muted)}
+.vod.old{opacity:.6;border-style:dotted}
+.todayb{all:unset;cursor:pointer;font-size:12px;color:var(--done);white-space:nowrap}
+.todayb:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.done .todayb{color:var(--muted)}
+.dt{font:inherit;font-size:13px;padding:2px 6px;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--ink)}
+.views{display:flex;flex-wrap:wrap;gap:4px 10px;font-family:var(--mono);font-size:12.5px}
+.views button{all:unset;cursor:pointer;color:var(--muted);margin-left:3px;padding:0 3px}
+.views button:focus-visible{outline:2px solid var(--accent)}
+.wantb{all:unset;cursor:pointer;font-size:12px;color:var(--muted);white-space:nowrap}
+.wantb[aria-pressed="true"]{color:var(--accent);font-weight:700}
+.wantb:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.detail .full{grid-column:1/-1}
+.same{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:13px}
+.same li{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.same .jmp{all:unset;cursor:pointer;font-family:var(--display);font-weight:600;border-bottom:1px dotted var(--muted)}
+.same .jmp:hover{color:var(--accent);border-bottom-color:var(--accent)}
+.same .jmp:focus-visible{outline:2px solid var(--accent)}
+.same .m{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.same .ok{color:var(--done);font-size:12px}
+/* today's pick */
+.pick{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.pickhead{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+.pickhead h2{margin:0;font-family:var(--display);font-weight:800;font-size:20px}
+.pickctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.pickctl select{font:inherit;font-size:13px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;max-width:100%}
+.pickctl label{font-size:13px;display:inline-flex;gap:6px;align-items:center}
+.pickcard{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 18px;align-items:center}
+@media (max-width:640px){.pickcard{grid-template-columns:1fr}}
+.pickcard .pt{font-family:var(--display);font-weight:800;font-size:clamp(22px,4vw,30px);line-height:1.25}
+.pickcard .pm{font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:2px 12px}
+.pickcard .pb{display:flex;flex-wrap:wrap;gap:8px;grid-column:1/-1;margin-top:4px}
+.pickcard .ps{font-family:var(--mono);text-align:right;font-size:12px;color:var(--muted)}
+.pickcard .ps b{display:block;font-size:30px;font-weight:500;color:var(--accent);line-height:1}
+@media (max-width:640px){.pickcard .ps{text-align:left}}
+/* progress charts */
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 32px;margin-top:14px}
+@media (max-width:760px){.stats{grid-template-columns:1fr}}
+.stats .wide{grid-column:1/-1}
+.dirbars{max-height:420px;overflow:auto;padding-right:6px}
+.stats > div{min-width:0}
+.hb{display:grid;grid-template-columns:minmax(64px,auto) minmax(0,1fr) auto;gap:4px 10px;align-items:center;font-size:12.5px}
+.hb .lb{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:11em}
+.hb .tr{height:10px;background:var(--frame-off);border-radius:2px;overflow:hidden}
+.hb .tr i{display:block;height:100%;background:var(--done)}
+.hb .vl{font-family:var(--mono);font-size:11.5px;color:var(--muted);white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
+.yc{display:flex;align-items:flex-end;gap:3px;height:150px;border-bottom:1px solid var(--ink);padding-top:16px;min-width:min-content}
+.yc .c{flex:1 1 0;min-width:12px;max-width:40px;display:flex;flex-direction:column;justify-content:flex-end;align-items:stretch;height:100%;position:relative}
+.yc .c i{display:block;background:var(--done)}
+.yc .c i.o{background:var(--muted);opacity:.55}
+.yc .c b{position:absolute;top:-16px;left:0;right:0;text-align:center;font-family:var(--mono);font-size:10px;font-weight:400;color:var(--muted)}
+.yl{display:flex;gap:3px;min-width:min-content}
+.ycw{overflow-x:auto;padding-bottom:2px}
+.yl span{flex:1 1 0;min-width:12px;max-width:40px;text-align:center;font-family:var(--mono);font-size:10px;color:var(--muted)}
+.key{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:6px}
+.key i{display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--done);margin-right:5px;vertical-align:-1px}
+.key i.o{background:var(--muted);opacity:.55}
+.toast{position:fixed;z-index:30;left:16px;right:16px;margin:0 auto;width:fit-content;bottom:calc(68px + env(safe-area-inset-bottom,0px));display:flex;gap:14px;align-items:center;
+  background:var(--ink);color:var(--bg);font-size:13.5px;padding:10px 12px 10px 16px;border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,.25);max-width:calc(100vw - 32px)}
+.toast button{all:unset;cursor:pointer;font-weight:700;color:var(--accent-soft);white-space:nowrap;padding:2px 4px;border-radius:4px}
+.toast button:focus-visible{outline:2px solid var(--accent)}
+</style><div id="shelfBar" style="position:sticky;top:0;z-index:60;display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:6px 10px;margin:-8px 0 12px;background:var(--paper,#fff);border-bottom:1px solid var(--line,#ddd);font:14px/1.4 system-ui,sans-serif">
+<a href="index.html" style="font-weight:700;color:inherit;text-decoration:none;margin-right:6px">shelf</a>
+<a href="index.html" style="color:inherit;opacity:.75;padding:4px 8px;text-decoration:none">ホーム</a>
+<a href="library.html" style="color:inherit;opacity:.75;padding:4px 8px;text-decoration:none">蔵書</a>
+<a href="novels.html" style="color:inherit;padding:4px 8px;text-decoration:none;opacity:.75">必読書</a>
+<a href="films.html" style="color:inherit;padding:4px 8px;text-decoration:none;font-weight:700">映画</a>
+<span id="shelfSync" style="margin-left:auto;font-size:12px;opacity:.8">…</span>
+</div>
+<p id="shelfMsg" hidden style="padding:10px 12px;border-radius:8px;background:#f6ead2;color:#5a3d0a;font:14px system-ui,sans-serif"></p>
+
+
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">18 lists · 1,757 films</div>
+      <h1>Movie List Checker</h1>
+      <p class="lede">『死ぬまでに観たい映画1001本』を土台に、Sight &amp; Sound、AFI、BBC、TSPDT、カイエ、キネマ旬報、IMDb、日本映画の名作リストまで18のリストを突き合わせました。リストごとに対象（全映画・日本映画のみ・外国映画のみ・アメリカ映画・21世紀など）と発表年が違うため、邦画も洋画も同じ満点（100）になるように重みをそろえたスコアで並べています。</p>
+    </div>
+    <div class="meter">
+      <div class="big" id="seenBig">0<small> / 1757</small></div>
+      <div class="bar" style="margin-top:10px"><i id="seenBar"></i></div>
+      <div class="sync" id="sync">記録を読み込み中…</div>
+    </div>
+  </header>
+
+  <div class="tiers" id="tiers" role="group" aria-label="優先度で絞り込む"></div>
+
+  <section class="pick" id="pickSec" aria-label="今日の1本">
+    <div class="pickhead"><h2>今日の1本</h2>
+      <div class="pickctl">
+        <select id="pTier" aria-label="優先度"><option value="sa">最優先・必見から</option><option value="sab">推奨以上から</option><option value="">優先度：すべて</option></select>
+        <select id="pDec" aria-label="年代"></select>
+        <select id="pCty" aria-label="製作国"></select>
+        <select id="pVod" aria-label="配信"><option value="">配信：問わない</option><option value="sub">見放題あり</option><option value="any">配信あり（レンタル・購入を含む）</option></select>
+        <select id="pLen" aria-label="上映時間"><option value="">上映時間：問わない</option><option value="90">90分以内</option><option value="120">2時間以内</option><option value="150">2時間半以内</option><option value="151">2時間半を超える大作</option></select>
+        <label><input type="checkbox" id="pWant"> 観たい印のみ</label>
+      </div></div>
+    <div class="pickcard" id="pickCard"></div>
+  </section>
+
+  <div class="controls">
+    <input type="search" id="q" placeholder="邦題・原題・監督・国・年で検索" aria-label="検索">
+    <select id="list" aria-label="リストで絞り込む"></select>
+    <select id="decade" aria-label="年代で絞り込む"></select>
+    <select id="country" aria-label="製作国で絞り込む"></select>
+    <select id="jpf" aria-label="日本での入手性で絞り込む">
+      <option value="">日本公開：すべて</option>
+      <option value="J">◎ 公開・ソフト化あり</option>
+      <option value="F">△ 特集上映・限定</option>
+      <option value="N">× 日本未公開</option>
+    </select>
+    <select id="rec" aria-label="配信・ディスクの記録で絞り込む">
+      <option value="">配信・ディスク：すべて</option>
+      <option value="sub">見放題あり</option>
+      <option value="any">配信あり（レンタル・購入を含む）</option>
+      <option value="nostream">配信なし（調査済み）</option>
+      <option value="unk">配信は未調査</option>
+      <option value="disc">DVD/BDありと記録済</option>
+      <optgroup label="見放題のサービス" id="svcOpts"></optgroup>
+    </select>
+    <select id="sort" aria-label="並び順">
+      <option value="score">優先度順</option>
+      <option value="year">公開年順</option>
+      <option value="yeard">新しい順</option>
+      <option value="decade">年代順（年代内は優先度順）</option>
+      <option value="director">監督順</option>
+      <option value="country">製作国順</option>
+    </select>
+    <div class="seg" role="group" aria-label="鑑賞状況">
+      <button id="fAll" aria-pressed="true">すべて</button>
+      <button id="fTodo" aria-pressed="false">未見</button>
+      <button id="fDone" aria-pressed="false">鑑賞済</button>
+      <button id="fWant" aria-pressed="false">観たい</button>
+    </div>
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="legend" id="legend"></div>
+
+  <ol class="reel" id="reel"></ol>
+  <button class="backbtn" id="backBtn" hidden>← 元の並びに戻る</button>
+  <button class="more" id="more" hidden>さらに表示</button>
+
+  <details class="sources" id="statSec">
+    <summary>達成状況（年代・国・リスト別の鑑賞率と、年ごとの鑑賞本数）</summary>
+    <div class="stats" id="stats"></div>
+  </details>
+
+  <details class="sources">
+    <summary>集計に使ったリストと進捗</summary>
+    <div class="srcs" id="srcs"></div>
+    <p class="method">監督・製作国・日本での入手性（◎公開・ソフト化あり／△特集上映・映画祭など限定／×日本未公開）はClaudeの映画知識による目安で、<span class="unsure">要確認</span>印の作品は特定できていません。配信状況とDVD/BDの有無は月単位で変わるため一括取得はせず、各作品の「詳細」からJustWatch・Filmarks・Amazonで確認し、結果を記録できるようにしています。記録は鑑賞チェックと一緒にアカウントへ保存されます。</p>
+    <p class="method">スコアの出し方：全映画を対象にしたリスト（1001本、S&amp;S批評家・監督、TSPDT、カイエ、IMDb）は1本ずつ数えます。対象が限られた専門リスト（日本映画のみ・外国映画のみ・アメリカ映画のみ・英語以外・2000年以降）は、その作品が対象になる専門リストが何本あっても、掲載率×<span id="spwTxt">4</span>本分として数えます。これで日本映画専門リストが5本、外国映画専門リストが2本といったリスト数の違いが点数に影響しません。満点は、どの作品も「対象になるすべてのリストに掲載」で100です。リストの発表より後に公開された作品は、そのリストの枠を平均的な値（0.15）で埋めます。新作が少数のリストだけで満点にならないようにするためです。同点は、掲載リスト内の平均順位が高い順に並べています。</p>
+    <label class="method" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">専門リストの重み（全映画リスト何本分か）
+      <select id="spw" style="font:inherit;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink)"><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="8">8</option></select>
+      <span>数を大きくすると、専門リストでの評価（たとえば日本映画リストでの評価）が重くなります。</span></label>
+  </details>
+
+  <details class="sources" id="txSec">
+    <summary>一覧をテキストで書き出す（全リスト・鑑賞済み作品）</summary>
+    <div class="addlists">
+      <div class="form">
+        <div class="row2">
+          <label>書き出す内容<select id="txWhat" class="txsel">
+            <option value="all">全リスト（タイトル・監督・公開年）</option>
+            <option value="seen">鑑賞済み作品（タイトル・監督・公開年）</option>
+          </select></label>
+          <label>形式<select id="txFmt" class="txsel">
+            <option value="read">読みやすい形式（タイトル（公開年）／監督）</option>
+            <option value="tsv">タブ区切り（表計算ソフトに貼り付けやすい）</option>
+          </select></label>
+        </div>
+        <label class="chkline"><input type="checkbox" id="txView"> 今の絞り込みと並び順で書き出す（オフのときは全作品を優先度順）</label>
+        <label class="chkline"><input type="checkbox" id="txNo" checked> 優先度の順位番号を付ける</label>
+        <label class="chkline"><input type="checkbox" id="txMark"> 鑑賞済みの印（✓と鑑賞日）を付ける（全リストのとき）</label>
+        <label class="chkline"><input type="checkbox" id="txOff" checked> リスト外の鑑賞済み作品も含める（鑑賞済み作品のとき）</label>
+        <label class="chkline"><input type="checkbox" id="txDate"> 鑑賞日を付ける（鑑賞済み作品のとき）</label>
+        <textarea id="txOut" readonly aria-label="書き出す内容のプレビュー"></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn pri" id="txCopy">コピーする</button>
+          <button class="btn" id="txSave">テキストファイル（.txt）で保存</button>
+          <span class="mm" id="txMsg"></span>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <details class="sources" id="bkSec">
+    <summary>オフラインで使う・記録のバックアップ</summary>
+    <div class="addlists">
+      <div id="offlineBox">
+        <p class="h3">オフライン版</p>
+        <p class="method" style="margin:6px 0">このページを1つのHTMLファイルとして保存し、パソコンのブラウザ（Chrome・Edge・Firefox・Safari）で開けば、ネット接続なしで使えます。オフライン版の記録はそのブラウザの中に保存されます。オンライン版と記録をそろえたいときは、下のバックアップで書き出して、もう一方で読み込んでください。</p>
+        <button class="btn pri" id="dlOffline">オフライン版をダウンロード</button> <span class="mm" id="dlOfflineMsg"></span>
+      </div>
+      <div>
+        <p class="h3">記録のバックアップ</p>
+        <p class="method" style="margin:6px 0">鑑賞済みチェック・鑑賞日・配信やディスクの記録・取り込んだリスト・リスト外の鑑賞記録を1つのファイルに書き出します。読み込むと今の記録に統合されます（同じ作品は古い鑑賞日を優先）。</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn" id="bkExport">バックアップを書き出す</button>
+          <label class="btn" for="bkFile" style="cursor:pointer">バックアップを読み込む</label><input type="file" id="bkFile" accept=".json,application/json" hidden>
+          <span class="mm" id="bkMsg"></span>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <details class="sources" id="logSec">
+    <summary>鑑賞記録を取り込む（KINENOTEなど）／リスト外の鑑賞済み作品</summary>
+    <div class="addlists">
+      <div class="form">
+        <p class="h3">鑑賞記録を貼り付ける</p>
+        <p class="method" style="margin:0">1行に1作品。「作品名」「作品名（1954）」「作品名<タブ>1954<タブ>2023/05/01」などの形式に対応します。鑑賞日（2023/05/01、2023-05-01、2023年5月1日）が含まれていれば鑑賞日として記録します。KINENOTEの一覧をそのままコピーした雑多なテキストでも、作品名らしい行だけを拾います。Claudeが整形したデータもそのまま貼り付けられます。</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><label class="btn" for="wFile" style="cursor:pointer">ファイルを読み込む（KINENOTEのTSV・MediaMarkerのCSV・Claudeが作ったファイル）</label><input type="file" id="wFile" accept=".tsv,.csv,.txt,text/plain,text/csv,text/tab-separated-values" hidden><span class="mm" id="wFileName"></span></div>
+        <label>鑑賞記録<textarea id="wText" placeholder="七人の侍&#9;1954&#9;2021/03/14&#10;東京物語（1953）&#10;パラサイト 半地下の家族 2019 2020-01-12"></textarea></label>
+        <label class="chkline"><input type="checkbox" id="wGuess" checked> 推定一致も鑑賞済みにする</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="wCheck">照合する</button><button class="btn pri" id="wSave" disabled>鑑賞済みに反映する</button></div>
+        <div class="preview" id="wPrev"></div>
+      </div>
+      <div>
+        <p class="h3">リスト外の鑑賞済み作品 <span class="mm" id="offCount"></span></p>
+        <p class="method" style="margin:6px 0">どのリストにも載っていない鑑賞記録です。後でリストを追加して該当作品が現れると、自動で鑑賞済みに移ります。</p>
+        <input type="search" id="offQ" placeholder="リスト外の作品を検索" aria-label="リスト外の作品を検索" style="font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);width:100%;max-width:360px">
+        <ul class="offl" id="offList"></ul>
+        <button class="btn" id="offMore" hidden>さらに表示</button>
+      </div>
+    </div>
+  </details>
+
+  <details class="sources" id="addSec">
+    <summary>リストを追加する（未取得リストの入手先と取り込み）</summary>
+    <div class="addlists">
+      <div>
+        <p class="h3">まだ集計に入っていないリスト</p>
+        <p class="method" style="margin-top:6px">全件を取得できなかったリストと、入手できそうな手段です。手に入ったら「取り込む」から貼り付けると集計に加わります。写真やテキストをClaudeとのチャットに送れば、監督・製作国まで付けて組み込むこともできます。</p>
+        <div class="pend" id="pend"></div>
+      </div>
+      <div class="form" id="form">
+        <p class="h3">リストを貼り付けて取り込む</p>
+        <div class="row2">
+          <label>リスト名<input type="text" id="fName" placeholder="例：文春 日本映画ベスト150（1989）"></label>
+          <label>出典・メモ<input type="text" id="fSrc" placeholder="例：文春文庫ビジュアル版 ISBN 978-4-16-811609-4"></label>
+        </div>
+        <label>作品リスト（1行に1作品。「1. 七人の侍（1954）」「七人の侍 1954」「七人の侍」などの形式に対応）
+          <textarea id="fText" placeholder="1. 七人の侍（1954）&#10;2. 東京物語（1953）&#10;3. 浮雲"></textarea></label>
+        <div class="row2">
+          <label>リストの対象<select id="fScope" style="font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink)">
+            <option value="all">全映画（邦画・洋画とも）</option><option value="jp">日本映画のみ</option><option value="fo">外国映画のみ</option>
+            <option value="us">アメリカ映画のみ</option><option value="nonen">英語以外の映画のみ</option><option value="c21">2000年以降の映画のみ</option></select></label>
+          <label>リストの発表年（これより後の作品は対象外）<input type="text" id="fEnd" inputmode="numeric" placeholder="例：1989"></label>
+        </div>
+        <label class="chkline"><input type="checkbox" id="fRank" checked> 行頭の数字を順位として使う</label>
+        <label class="chkline"><input type="checkbox" id="fNew" checked> 照合できなかった作品も新しい作品として追加する</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="fCheck">照合する</button><button class="btn pri" id="fSave" disabled>保存して集計に含める</button></div>
+        <div class="preview" id="fPrev"></div>
+      </div>
+      <div>
+        <p class="h3">取り込んだリスト</p>
+        <div class="mine" id="mine"><p class="method">まだありません。</p></div>
+      </div>
+    </div>
+  </details>
+</div>
+
+
+
+<script src="app/store.js"></script>
+<script>
+"use strict";
+(async () => {
+  const CFG = {"title": "映画チェッカー — shelf", "works": "works/films.json", "docs": {"watched": "records/films-checker/watched.json", "offlist": "records/films-checker/offlist.json", "customLists": "records/films-checker/customLists.json"}, "code": "app/legacy-films.js"};
+  const bar = document.getElementById("shelfBar");
+  const msg = t => { const el = document.getElementById("shelfMsg"); if (el) { el.textContent = t; el.hidden = !t; } };
+  // 保存の状態
+  const pill = document.getElementById("shelfSync");
+  Shelf.onStatus(s => {
+    const m = { ok: "保存済み", idle: "準備中", syncing: s.msg || "通信中", pending: `送信待ち ${s.pending}件`, offline: s.pending ? `電波なし・送信待ち ${s.pending}件` : "電波なし", error: "保存できていません", notoken: "鍵が未設定" };
+    pill.textContent = m[s.state] || s.state; pill.dataset.state = s.state; pill.title = s.msg || "";
+  });
+  if (!Shelf.token()) { msg("鍵が設定されていません。ホームで鍵を入れてください。"); return; }
+  msg("記録を読み込んでいます…");
+  await Shelf.init();
+  if (!Shelf.read(CFG.works)) await Shelf.refresh();
+  const data = Shelf.read(CFG.works);
+  if (!data) { msg("作品データを読み込めませんでした。電波と鍵を確かめてください。"); return; }
+  msg("");
+  window.__DATA__ = JSON.parse(JSON.stringify(data));
+  const docPath = full => {
+    const id = full.split("/").pop();
+    if (CFG.docs[id]) return CFG.docs[id];
+    const m = id.match(/^log-(\d+)$/); if (m && CFG.logchunks) return CFG.logchunks.replace("{n}", m[1]);
+    return "records/misc/" + id + ".json";
+  };
+  const biblio = () => {
+    const b = Shelf.read("works/novels-biblio.json"); if (!b) return null;
+    return { ver: (b.last || "") + ":" + Object.keys(b.fix || {}).length + ":" + Object.keys(b.checked || {}).length, fixDocs: ["fix"], last: b.last, checked: b.checked };
+  };
+  window.claude = Shelf.legacyClaude({
+    docPath,
+    virtual: {
+      "biblio/meta": biblio,
+      "biblio/fix": () => { const b = Shelf.read("works/novels-biblio.json"); return b ? { items: b.fix || {} } : null; },
+    },
+    virtualSource: { "biblio/meta": "works/novels-biblio.json" },
+  });
+  const s = document.createElement("script"); s.src = CFG.code; document.body.appendChild(s);
+})();
+</script>
+
+</body>
+</html>

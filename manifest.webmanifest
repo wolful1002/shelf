@@ -1,0 +1,10 @@
+{
+  "name": "shelf 鑑賞・蔵書記録",
+  "short_name": "shelf",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f2ee",
+  "theme_color": "#365a7c",
+  "icons": [{ "src": "app/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

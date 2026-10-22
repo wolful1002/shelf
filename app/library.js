@@ -1,0 +1,489 @@
+// 蔵書の画面の動き
+"use strict";
+const { $, esc } = UI;
+UI.topbar("library.html");
+const CATS = Biblio.CATS;
+
+// ---------- 画面の切り替え ----------
+const TABS = ["register", "list", "queue", "stats", "places", "booklog", "off"];
+function showTab() {
+  const t = TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "register";
+  for (const x of TABS) { $("p-" + x).hidden = x !== t; document.querySelector(`[data-tab="${x}"]`).setAttribute("aria-current", x === t ? "true" : "false"); }
+  render(t);
+}
+addEventListener("hashchange", showTab);
+function render(t = location.hash.slice(1) || "register") {
+  $("qCount").textContent = Object.keys(Lib.queue()).length || "";
+  if (t === "list") renderList();
+  else if (t === "queue") renderQueue();
+  else if (t === "stats") renderStats();
+  else if (t === "places") renderPlaces();
+  else if (t === "booklog") renderBooklog();
+  else if (t === "off") renderOff();
+  else renderLocSelect();
+}
+
+(async () => {
+  if (!Shelf.token()) { $("main").prepend(UI.keyCard()); return; }
+  await Shelf.init();
+  const ready = () => { const n = Shelf.read(Lib.P.novels), f = Shelf.read(Lib.P.films); if (n) Biblio.setNovels(n); if (f) Biblio.setFilms(f); };
+  ready(); Shelf.on(Lib.P.novels, ready); Shelf.on(Lib.P.films, ready);
+  Lib.reconcile();
+  Shelf.on(Lib.P.novelDoc, (d, remote) => { if (remote) { Lib.reconcile(); render(); } });
+  let t = null;
+  Shelf.onAny((p, remote) => { if (remote && /records\//.test(p)) { clearTimeout(t); t = setTimeout(() => render(), 300); } });
+  fillSelects();
+  showTab();
+})();
+
+function fillSelects() {
+  $("mc").innerHTML = CATS.map(c => `<option>${esc(c)}</option>`).join("");
+  $("fCat").innerHTML = `<option value="">種類：すべて</option>` + CATS.map(c => `<option>${esc(c)}</option>`).join("");
+}
+
+// ---------- 登録 ----------
+let mode = "now", media = "paper";
+const seg = (a, b, on) => { $(a).setAttribute("aria-pressed", on ? "true" : "false"); $(b).setAttribute("aria-pressed", on ? "false" : "true"); };
+$("mNow").onclick = () => { mode = "now"; seg("mNow", "mBatch", true); $("batchBox").hidden = true; };
+$("mBatch").onclick = () => { mode = "batch"; seg("mNow", "mBatch", false); $("batchBox").hidden = false; renderBatch(); };
+$("mdPaper").onclick = () => { media = "paper"; seg("mdPaper", "mdEbook", true); };
+$("mdEbook").onclick = () => { media = "ebook"; seg("mdPaper", "mdEbook", false); };
+
+let curLoc = sessionStorage.getItem("shelf.curLoc") || "";
+function renderLocSelect() {
+  const pl = Lib.places();
+  $("curLoc").innerHTML = `<option value="">（指定しない）</option>` + Object.entries(pl).map(([c, n]) => `<option value="${esc(n)}"${n === curLoc ? " selected" : ""}>${esc(n)}</option>`).join("");
+}
+$("curLoc").onchange = () => { curLoc = $("curLoc").value; sessionStorage.setItem("shelf.curLoc", curLoc); };
+
+let stopCam = null;
+$("camBtn").onclick = async () => {
+  $("videoBox").hidden = false; $("camBtn").hidden = true; $("camStop").hidden = false;
+  try { stopCam = await Scan.startCamera($("video"), onCode, e => { $("engine").hidden = false; $("engine").textContent = "読み取り：" + e; }); }
+  catch (e) { UI.toast("カメラを使えません：" + (e.name || e.message)); $("camStop").onclick(); }
+};
+$("camStop").onclick = () => { if (stopCam) stopCam(); stopCam = null; $("videoBox").hidden = true; $("camBtn").hidden = false; $("camStop").hidden = true; $("engine").hidden = true; };
+Scan.bindInput($("scanIn"), (c, s) => onCode(c, "scanner"));
+
+const logRows = [];
+function log(cls, html, undo) {
+  const id = "lg" + Date.now() + Math.random().toString(36).slice(2, 5);
+  logRows.unshift({ id, cls, html, undo });
+  if (logRows.length > 60) logRows.length = 60;
+  $("regLog").innerHTML = logRows.map(r => `<div class="${r.cls}" id="${r.id}">${r.html}${r.undo ? ` <button type="button" class="quiet small" data-undo="${r.id}">取り消す</button>` : ""}</div>`).join("");
+}
+$("regLog").addEventListener("click", e => {
+  const b = e.target.closest("[data-undo]"); if (!b) return;
+  const r = logRows.find(x => x.id === b.dataset.undo); if (!r || !r.undo) return;
+  r.undo(); r.undo = null; r.cls = "ng"; r.html = "取り消しました：" + r.html; log("", "取り消しました"); logRows.shift();
+  $("regLog").innerHTML = logRows.map(x => `<div class="${x.cls}" id="${x.id}">${x.html}${x.undo ? ` <button type="button" class="quiet small" data-undo="${x.id}">取り消す</button>` : ""}</div>`).join("");
+});
+
+let lastReg = null, pendingC = null; // 上段と下段を組み合わせるため
+async function onCode(code, src = "camera") {
+  const c = Biblio.classify(code);
+  if (c.kind === "label") {
+    const name = Lib.places()[c.code];
+    if (name) { curLoc = name; sessionStorage.setItem("shelf.curLoc", name); renderLocSelect(); Scan.beep("ok"); log("ok", `場所を「${esc(name)}」に切り替えました`); }
+    else { Scan.beep("ng"); log("ng", `登録されていない場所ラベルです（${esc(c.code)}）`); }
+    return;
+  }
+  if (c.kind === "lower") {
+    if (lastReg && Date.now() - lastReg.at < 15000) { applyC(lastReg, c.ccode); Scan.beep("ok"); }
+    else { pendingC = { c: c.ccode, at: Date.now() }; Scan.beep("warn"); log("warn", `下段（${esc(c.ccode)} ${esc(Biblio.cText(c.ccode))}）を覚えました。続けて上段を読んでください`); }
+    return;
+  }
+  if (c.kind === "bad" || c.kind === "other") { Scan.beep("ng"); log("ng", `本のバーコードではありません（${esc(code)}）`); return; }
+  if (mode === "batch") { addBatch(c.code); return; }
+  await registerCode(c, src);
+}
+function applyC(reg, ccode) {
+  const it = Lib.get(reg.id); if (!it) return;
+  const x = JSON.parse(JSON.stringify(it));
+  if (!x.ccode) x.ccode = ccode;
+  const cat = Biblio.catFromC(ccode), fmt = Biblio.formatFromC(ccode);
+  if (cat && (!x.catAuto || x.cat === "その他" || !it.ccode)) { x.cat = cat; x.catAuto = true; }
+  if (fmt && x.media !== "ebook") x.fmt = fmt;
+  Lib.put(x);
+  for (const [id, q] of Object.entries(Lib.queue())) if (q.target === x.id && q.type === "cat") Lib.qDel(id);
+  log("ok", `　└ 下段から：${esc(Biblio.cText(ccode))} → 種類「${esc(x.cat)}」`);
+}
+async function registerCode(c, src) {
+  let ccode = pendingC && Date.now() - pendingC.at < 15000 ? pendingC.c : null; pendingC = null;
+  const inp = { src, loc: curLoc || undefined, media, ccode: ccode || undefined };
+  if (c.kind === "magazine") { Object.assign(inp, { mag: c.mag, magMonth: c.month, t: `雑誌 ${c.mag}（${c.month}月号）` }); }
+  else {
+    inp.isbn = c.code;
+    const dupe = Lib.byIsbn(c.code);
+    if (!dupe) { log("", `<span class="mono">${esc(c.code)}</span> 調べています…`); inp.bib = await Biblio.lookup(c.code); logRows.shift(); }
+  }
+  const r = await Lib.register(inp);
+  const it = r.item;
+  if (r.status === "alt") { Scan.beep("ok"); lastReg = { id: it.id, at: Date.now() }; log("ok", `別の版として追加：<b>${esc(it.t)}</b>（同じ作品の記録にまとめました）`); return; }
+  if (r.status === "dup" || r.status === "voldup") {
+    Scan.beep("dup");
+    log("dup", `所持済み：<b>${esc(it.t)}</b>${r.vol != null ? ` ${r.vol}巻` : ""}・${esc(it.loc || "場所未設定")}`);
+    return;
+  }
+  Scan.beep(r.match?.status === "wait" || !inp.bib && c.kind !== "magazine" ? "warn" : "ok");
+  lastReg = { id: it.id, at: Date.now() };
+  const tags = [];
+  if (r.status === "vol") tags.push(`<span class="pill acc">${r.newSeries ? "シリーズを新しく作成" : "シリーズに追加"}</span>`);
+  if (it.nk) tags.push(`<span class="pill acc">必読書と結び付け</span>`);
+  if (r.upgraded) tags.push(`<span class="pill">チェッカーの仮登録を本の情報で更新</span>`);
+  if (r.match?.status === "wait") tags.push(`<span class="pill warn">結び付けは確認待ち</span>`);
+  if (!inp.bib && c.kind !== "magazine") tags.push(`<span class="pill warn">書誌なし・確認待ち</span>`);
+  const undo = r.status === "vol" && !r.newSeries
+    ? () => { const s = JSON.parse(JSON.stringify(Lib.get(it.id))); delete s.vols[r.vol]; Lib.put(s); }
+    : () => { if (it.nk) Lib.setOwn(it.nk, false); Lib.qDelFor(it.id); Lib.remove(it.id); };
+  log("ok", `登録：<b>${esc(it.t)}</b>${r.vol != null ? ` ${r.vol}巻` : ""}・${esc(it.cat)}${it.loc ? "・" + esc(it.loc) : ""} ${tags.join(" ")}`, undo);
+  if (ccode) applyC(lastReg, ccode);
+  render("register");
+}
+
+// ためて後で確認
+const BKEY = "shelf.batch";
+const batch = () => { try { return JSON.parse(localStorage.getItem(BKEY) || "[]"); } catch { return []; } };
+const setBatch = b => { try { localStorage.setItem(BKEY, JSON.stringify(b)); } catch {} };
+function addBatch(code) {
+  const b = batch();
+  if (b.some(x => x.code === code)) { Scan.beep("dup"); return; }
+  const owned = Lib.byIsbn(code);
+  b.unshift({ code, loc: curLoc, media, at: Date.now(), owned: !!owned });
+  setBatch(b); Scan.beep(owned ? "dup" : "ok"); renderBatch();
+  if (!owned) Biblio.lookup(code).then(bib => { const x = batch(); const e = x.find(y => y.code === code); if (e) { e.t = bib?.t || "（書誌なし）"; e.a = bib?.a || ""; setBatch(x); renderBatch(); } });
+}
+function renderBatch() {
+  const b = batch();
+  $("batchN").textContent = `${b.length}件`;
+  $("batchList").innerHTML = b.map((x, i) => `<li><div><div class="t">${esc(x.t || "調べています…")}</div><div class="m"><span class="mono">${esc(x.code)}</span>${x.a ? `<span>${esc(x.a)}</span>` : ""}${x.loc ? `<span>${esc(x.loc)}</span>` : ""}${x.owned ? `<span class="pill">所持済み</span>` : ""}</div></div><button type="button" class="quiet small" data-bdel="${i}">外す</button></li>`).join("") || `<li class="empty">まだありません</li>`;
+}
+$("batchList").addEventListener("click", e => { const b = e.target.closest("[data-bdel]"); if (!b) return; const x = batch(); x.splice(+b.dataset.bdel, 1); setBatch(x); renderBatch(); });
+$("batchClear").onclick = () => { setBatch([]); renderBatch(); };
+$("batchReg").onclick = async () => {
+  const b = batch(); if (!b.length) return;
+  $("batchReg").disabled = true;
+  let n = 0;
+  for (const x of b.slice().reverse()) {
+    if (x.owned || Lib.byIsbn(x.code)) continue;
+    const bib = await Biblio.lookup(x.code);
+    const r = await Lib.register({ isbn: x.code, bib, src: "scanner", loc: x.loc || undefined, media: x.media });
+    if (r.status === "new" || r.status === "vol") n++;
+    log("ok", `登録：<b>${esc(r.item.t)}</b>${r.vol != null ? ` ${r.vol}巻` : ""}`);
+  }
+  setBatch([]); renderBatch(); $("batchReg").disabled = false; UI.toast(`${n}件を登録しました`);
+};
+
+// 書名で探す（国立国会図書館の検索）
+$("tqBtn").onclick = async () => {
+  const q = $("tq").value.trim(); if (!q) return;
+  $("tqList").innerHTML = `<li class="empty">探しています…</li>`;
+  try {
+    const r = await fetch(`https://ndlsearch.ndl.go.jp/api/opensearch?title=${encodeURIComponent(q)}&cnt=20&mediatype=1`);
+    const x = new DOMParser().parseFromString(await r.text(), "application/xml");
+    const items = [...x.getElementsByTagName("item")].map(it => {
+      const g = n => it.getElementsByTagName(n)[0]?.textContent?.trim() || "";
+      const isbn = [...it.getElementsByTagName("dc:identifier")].map(e => e.textContent).map(Biblio.normIsbn).find(Boolean);
+      return { t: g("dc:title") || g("title"), a: g("dc:creator"), pub: g("dc:publisher"), y: g("dcterms:issued"), isbn };
+    });
+    $("tqList").innerHTML = items.map((it, i) => `<li><div><div class="t">${esc(it.t)}</div><div class="m"><span>${esc(it.a)}</span><span>${esc(it.pub)}</span><span>${esc(it.y)}</span>${it.isbn ? `<span class="mono">${it.isbn}</span>` : `<span>ISBNなし</span>`}</div></div><button type="button" class="small" data-tq="${i}">登録</button></li>`).join("") || `<li class="empty">見つかりませんでした</li>`;
+    $("tqList").onclick = async e => {
+      const b = e.target.closest("[data-tq]"); if (!b) return;
+      const it = items[+b.dataset.tq]; b.disabled = true;
+      if (it.isbn) await registerCode({ kind: "isbn", code: it.isbn }, "search");
+      else { const r = await Lib.register({ t: it.t, a: it.a, src: "search", loc: curLoc || undefined, media, bib: { t: it.t, a: it.a, pub: it.pub, y: parseInt(it.y) || null } }); log("ok", `登録：<b>${esc(r.item.t)}</b>`); }
+      b.textContent = "登録済み";
+    };
+  } catch { $("tqList").innerHTML = `<li class="empty">検索できませんでした。電波を確かめてください</li>`; }
+};
+$("tq").addEventListener("keydown", e => { if (e.key === "Enter") $("tqBtn").click(); });
+
+// 手入力
+$("mSave").onclick = async () => {
+  const t = $("mt").value.trim(); if (!t) { UI.toast("書名を入れてください"); return; }
+  const r = await Lib.register({ t, a: $("ma").value.trim(), src: "manual", loc: curLoc || undefined, media, bib: { t, a: $("ma").value.trim(), pub: $("mp").value.trim() } });
+  const it = JSON.parse(JSON.stringify(r.item)); it.cat = $("mc").value; it.catAuto = false; Lib.put(it); Lib.qDelFor(it.id);
+  log("ok", `登録：<b>${esc(it.t)}</b>・${esc(it.cat)}`);
+  $("mt").value = $("ma").value = $("mp").value = "";
+};
+
+// ---------- 一覧 ----------
+let LST = { q: "", sort: "added", cat: "", media: "", loc: "", read: "", link: "" }, shown = 100;
+const stack = [];
+function syncListControls() { $("q").value = LST.q; $("sort").value = LST.sort; $("fCat").value = LST.cat; $("fMedia").value = LST.media; $("fLoc").value = LST.loc; $("fRead").value = LST.read; $("fLink").value = LST.link; $("backBtn").hidden = !stack.length || location.hash !== "#list"; }
+for (const [id, key] of [["q", "q"], ["sort", "sort"], ["fCat", "cat"], ["fMedia", "media"], ["fLoc", "loc"], ["fRead", "read"], ["fLink", "link"]])
+  $(id).addEventListener(id === "q" ? "input" : "change", () => { LST[key] = $(id).value; shown = 100; renderList(); });
+$("backBtn").onclick = () => { const s = stack.pop(); if (s) { LST = s; shown = 100; renderList(); } };
+function pushState(patch) { stack.push({ ...LST }); Object.assign(LST, patch); shown = 100; renderList(); window.scrollTo(0, 0); }
+const searchKey = it => Biblio.norm([it.t, it.a, it.pub, it.label, it.isbn, it.loc, it.note, ...Object.values(it.vols || {}).map(v => v.isbn)].filter(Boolean).join(" "));
+function listRows() {
+  const q = Biblio.norm(LST.q);
+  let rows = Object.values(Lib.items()).filter(it => it.st === "own");
+  if (q) rows = rows.filter(it => searchKey(it).includes(q));
+  if (LST.cat) rows = rows.filter(it => it.cat === LST.cat);
+  if (LST.media) rows = rows.filter(it => (it.media || "paper") === LST.media);
+  if (LST.loc) rows = rows.filter(it => (it.loc || "") === (LST.loc === "-" ? "" : LST.loc));
+  if (LST.read) rows = rows.filter(it => LST.read === "read" ? Lib.isRead(it) : !Lib.isRead(it));
+  if (LST.link) rows = rows.filter(it => LST.link === "yes" ? !!it.nk : LST.link === "wait" ? it.link === "wait" : !it.nk && it.link !== "wait");
+  const k = { title: it => Biblio.norm(it.t), author: it => Biblio.norm(it.a), pub: it => Biblio.norm(it.pub), loc: it => it.loc || "￿", year: it => it.y || 9999, added: it => -(Date.parse(it.added) || 0) }[LST.sort];
+  rows.sort((a, b) => { const x = k(a), y = k(b); return x < y ? -1 : x > y ? 1 : 0; });
+  return rows;
+}
+function renderList() {
+  const locs = [...new Set(Object.values(Lib.items()).map(it => it.loc).filter(Boolean))].sort();
+  $("fLoc").innerHTML = `<option value="">保管場所：すべて</option><option value="-">（未設定）</option>` + locs.map(l => `<option>${esc(l)}</option>`).join("");
+  syncListControls();
+  const rows = listRows();
+  $("listCount").textContent = `${rows.length}件`;
+  $("list").innerHTML = rows.slice(0, shown).map(rowHtml).join("") || `<li class="empty">該当する本はありません</li>`;
+  $("more").hidden = rows.length <= shown;
+}
+$("more").onclick = () => { shown += 200; renderList(); };
+function volSummary(it) {
+  const own = Object.entries(it.vols || {}).filter(([, v]) => v.own).map(([n]) => +n).sort((a, b) => a - b);
+  const read = Object.entries(it.vols || {}).filter(([, v]) => v.read).map(([n]) => +n);
+  const max = Math.max(it.total || 0, ...own, 0);
+  const miss = []; for (let i = 1; i <= max; i++) if (!own.includes(i)) miss.push(i);
+  return `所持 ${own.length}${it.total ? "/" + it.total : ""}巻${miss.length ? `（${miss.slice(0, 6).join("・")}${miss.length > 6 ? "…" : ""}巻欠）` : ""}・読了 ${read.length}巻`;
+}
+function rowHtml(it) {
+  const read = Lib.isRead(it);
+  const meta = [
+    it.a ? `<button type="button" class="chip" data-by="author" data-v="${esc(it.a)}">${esc(it.a)}</button>` : "",
+    it.pub ? `<button type="button" class="chip" data-by="pub" data-v="${esc(it.pub)}">${esc(it.pub)}</button>` : "",
+    it.loc ? `<button type="button" class="chip" data-by="loc" data-v="${esc(it.loc)}">${esc(it.loc)}</button>` : `<span>場所未設定</span>`,
+    `<span>${esc(it.cat)}${it.fmt ? "・" + esc(it.fmt) : ""}</span>`,
+  ].filter(Boolean).join("");
+  const pills = [
+    it.kind === "series" ? `<span class="pill acc">${esc(volSummary(it))}</span>` : "",
+    it.media === "ebook" ? `<span class="pill">電子</span>` : "",
+    it.nk ? `<span class="pill acc">必読書</span>` : it.link === "wait" ? `<span class="pill warn">結び付け確認待ち</span>` : "",
+    it.kind !== "series" ? (read ? `<span class="pill ok">読了</span>` : `<span class="pill">未読</span>`) : "",
+  ].join(" ");
+  return `<li><div class="li-wrap">${it.cover ? `<img class="cover" src="${esc(it.cover)}" alt="" loading="lazy">` : ""}<div><button type="button" class="open" data-open="${esc(it.id)}"><span class="t">${esc(it.t)}</span></button><div class="m">${meta}</div><div>${pills}</div></div></div></li>`;
+}
+$("list").addEventListener("click", e => {
+  const o = e.target.closest("[data-open]"); if (o) { openDetail(o.dataset.open); return; }
+  const c = e.target.closest("[data-by]");
+  if (c) { const by = c.dataset.by, v = c.dataset.v; pushState(by === "loc" ? { loc: v, q: "", sort: "title" } : { q: v, sort: by === "author" ? "year" : "title" }); }
+});
+
+// ---------- 詳細 ----------
+function openDetail(id) {
+  const it0 = Lib.get(id); if (!it0) return;
+  const it = JSON.parse(JSON.stringify(it0));
+  const works = Shelf.read(Lib.P.novels);
+  const work = it.nk && works ? works.books.find(b => b.k === it.nk) : null;
+  const read = Lib.isRead(it), rd = Lib.readDate(it);
+  const places = Object.values(Lib.places());
+  const f = (key, label, type = "text") => `<label class="f">${label}<input type="${type}" data-k="${key}" value="${esc(it[key] ?? "")}"></label>`;
+  const html = `
+    <div class="grid2">
+      ${f("t", "書名")}${f("a", "著者")}
+      <label class="f">種類<select data-k="cat">${CATS.map(c => `<option${c === it.cat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
+      <label class="f">判型<select data-k="fmt"><option value="">（未設定）</option>${Biblio.FORMATS.map(c => `<option${c === it.fmt ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
+      <label class="f">紙か電子か<select data-k="media"><option value="paper"${it.media !== "ebook" ? " selected" : ""}>紙</option><option value="ebook"${it.media === "ebook" ? " selected" : ""}>電子</option></select></label>
+      <label class="f">保管場所<input type="text" data-k="loc" list="plDl" value="${esc(it.loc || "")}"><datalist id="plDl">${places.map(p => `<option value="${esc(p)}">`).join("")}</datalist></label>
+      ${f("pub", "出版社")}${f("label", "レーベル")}${f("tr", "訳者")}${f("y", "刊行年", "number")}
+      ${it.kind !== "series" ? f("isbn", "ISBN") : ""}${f("note", "版のメモ")}
+    </div>
+    ${it.kind === "series" ? seriesHtml(it) : `
+    <div class="row"><label class="row" style="gap:6px"><input type="checkbox" id="dRead"${read ? " checked" : ""}> 読了</label>
+      <input type="date" id="dReadDate" value="${esc(rd)}" aria-label="読了日"><span class="small muted">${it.nk ? "必読書チェッカーと共有しています" : ""}</span></div>`}
+    <div class="card" style="background:var(--bg)">
+      <h3>必読書チェッカーとの結び付き</h3>
+      ${work ? `<p><b>${esc(work.t)}</b>（${esc(work.a)}・${work.y}）<span class="pill acc">${esc(Biblio.tierNm(work.sc))}</span></p><div class="row"><a class="btn quiet small" href="novels.html">チェッカーを開く</a><button type="button" class="quiet small" id="dUnlink">結び付けを外す</button></div>`
+        : `<p class="small muted">結び付いていません</p>`}
+      <div class="row"><input type="search" id="dWq" class="grow" placeholder="作品名で探して結び付ける" aria-label="作品名で探す"><button type="button" class="small quiet" id="dWbtn">探す</button></div>
+      <div class="cands" id="dWres"></div>
+    </div>
+    <div class="row">
+      <span class="small muted grow">状態：${{ own: "所有", off: "所有を外した", gone: "手放した" }[it.st]}・登録の入口：${esc(it.src)}</span>
+      ${it.st !== "own" ? `<button type="button" class="small" data-st="own">所有に戻す</button>` : `<button type="button" class="quiet small" data-st="off">所有を外す</button><button type="button" class="quiet small" data-st="gone">手放した</button>`}
+    </div>
+    <div class="row"><button type="button" id="dSave">保存する</button><span class="grow"></span><button type="button" class="danger small" id="dDel">記録を消す</button></div>
+    <p class="small" id="dDelConfirm" hidden>本当に消しますか？ 消した記録は戻せません。<button type="button" class="danger small" id="dDelYes">消す</button></p>`;
+  const d = UI.dialog(it.t || "詳細", html, () => render());
+  const q = s => d.querySelector(s);
+  q("#dSave").onclick = () => {
+    d.querySelectorAll("[data-k]").forEach(el => { let v = el.value.trim(); if (el.dataset.k === "y") v = v ? +v : null; if (v === "" || v == null) delete it[el.dataset.k]; else it[el.dataset.k] = v; });
+    if (it.cat !== it0.cat) { it.catAuto = false; for (const [qid, x] of Object.entries(Lib.queue())) if (x.target === it.id && x.type === "cat") Lib.qDel(qid); }
+    if (it.isbn) it.isbn = Biblio.normIsbn(it.isbn) || it.isbn;
+    Lib.put(it);
+    if (it.kind !== "series") {
+      const on = q("#dRead").checked, date = q("#dReadDate").value;
+      if (on !== read || (on && date !== rd)) Lib.setRead(it, on, date || null);
+    }
+    UI.toast("保存しました"); d.close();
+  };
+  d.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { Lib.setStatus(it0, b.dataset.st); UI.toast({ own: "所有に戻しました", off: "所有を外しました", gone: "手放したことにしました" }[b.dataset.st]); d.close(); });
+  q("#dDel").onclick = () => { q("#dDelConfirm").hidden = false; };
+  q("#dDelYes").onclick = () => { if (it0.nk) Lib.setOwn(it0.nk, false); Lib.qDelFor(it0.id); Lib.remove(it0.id); UI.toast("消しました"); d.close(); };
+  if (q("#dUnlink")) q("#dUnlink").onclick = () => { Lib.link(it0, null); UI.toast("結び付けを外しました"); d.close(); };
+  q("#dWbtn").onclick = () => {
+    const k = Biblio.norm(q("#dWq").value); if (!k || !works) return;
+    const hits = works.books.filter(b => Biblio.norm(b.t + " " + (b.o || "")).includes(k)).slice(0, 8);
+    q("#dWres").innerHTML = hits.map(b => `<button type="button" data-wk="${b.k}">${esc(b.t)}（${esc(b.a)}・${b.y}）</button>`).join("") || `<p class="small muted">見つかりませんでした</p>`;
+  };
+  q("#dWres").onclick = e => { const b = e.target.closest("[data-wk]"); if (!b) return; Lib.link(it0, b.dataset.wk); UI.toast("結び付けました"); d.close(); };
+  if (it.kind === "series") bindSeries(d, it);
+}
+function seriesHtml(it) {
+  const nums = Object.keys(it.vols || {}).map(Number);
+  const max = Math.max(it.total || 0, ...nums, 1);
+  let btns = ""; for (let i = 1; i <= max; i++) { const v = it.vols?.[i] || {}; btns += `<button type="button" data-vol="${i}" class="${v.own ? "own" : ""} ${v.read ? "read" : ""}"><b>${i}</b><span class="small">${v.own ? "所持" : "未所持"}${v.read ? "・読" : ""}</span></button>`; }
+  return `<div class="card" style="background:var(--bg)">
+    <div class="row"><h3 class="grow">巻ごとの所持と読了</h3><div class="seg" role="group" aria-label="切り替える内容"><button type="button" id="vmOwn" aria-pressed="true">所持</button><button type="button" id="vmRead" aria-pressed="false">読了</button></div></div>
+    <p class="small muted">巻を押すと、上で選んだ内容が切り替わります。下線は読了です。</p>
+    <div class="vols" id="vols">${btns}</div>
+    <div class="row"><label class="f">ここまで読んだ（巻）<input type="number" id="vUpTo" min="1" style="width:6em"></label><button type="button" class="small" id="vUpBtn">まとめて読了にする</button></div>
+    <div class="row"><label class="f">既刊数<input type="number" id="vTotal" min="1" value="${esc(it.total || "")}" style="width:6em"></label><label class="row" style="gap:6px"><input type="checkbox" id="vDone"${it.done ? " checked" : ""}> 完結</label><label class="f">巻を足す<input type="number" id="vAdd" min="1" style="width:6em"></label><button type="button" class="small quiet" id="vAddBtn">足す</button></div>
+  </div>`;
+}
+function bindSeries(d, it) {
+  let vm = "own";
+  const q = s => d.querySelector(s);
+  const redraw = () => { const tmp = document.createElement("div"); tmp.innerHTML = seriesHtml(it); q("#vols").innerHTML = tmp.querySelector("#vols").innerHTML; };
+  q("#vmOwn").onclick = () => { vm = "own"; q("#vmOwn").setAttribute("aria-pressed", "true"); q("#vmRead").setAttribute("aria-pressed", "false"); };
+  q("#vmRead").onclick = () => { vm = "read"; q("#vmOwn").setAttribute("aria-pressed", "false"); q("#vmRead").setAttribute("aria-pressed", "true"); };
+  q("#vols").onclick = e => {
+    const b = e.target.closest("[data-vol]"); if (!b) return;
+    const n = b.dataset.vol; it.vols = it.vols || {}; const v = it.vols[n] = it.vols[n] || {};
+    if (vm === "own") { if (v.own) delete v.own; else v.own = 1; } else { if (v.read) delete v.read; else v.read = UI.today(); }
+    if (!v.own && !v.read && !v.isbn) delete it.vols[n];
+    Lib.put(it); redraw();
+  };
+  q("#vUpBtn").onclick = () => { const n = +q("#vUpTo").value; if (!n) return; it.vols = it.vols || {}; for (let i = 1; i <= n; i++) { const v = it.vols[i] = it.vols[i] || {}; if (!v.read) v.read = 1; } Lib.put(it); redraw(); UI.toast(`${n}巻まで読了にしました`); };
+  q("#vAddBtn").onclick = () => { const n = +q("#vAdd").value; if (!n) return; it.vols = it.vols || {}; it.vols[n] = { ...(it.vols[n] || {}), own: 1 }; Lib.put(it); redraw(); };
+  q("#vTotal").onchange = () => { const n = +q("#vTotal").value; if (n) it.total = n; else delete it.total; Lib.put(it); redraw(); };
+  q("#vDone").onchange = () => { it.done = q("#vDone").checked || undefined; Lib.put(it); };
+}
+
+// ---------- 確認待ち ----------
+const QNAME = { link: "チェッカーとの結び付け", cat: "本の種類", bib: "書誌が見つからない本", check: "書誌の確認", unowned: "所有を外した本" };
+function renderQueue() {
+  const q = Object.entries(Lib.queue()).sort((a, b) => (a[1].at < b[1].at ? -1 : 1));
+  const works = Shelf.read(Lib.P.novels); const wk = works ? new Map(works.books.map(b => [b.k, b])) : new Map();
+  $("qList").innerHTML = q.map(([id, x]) => {
+    const it = Lib.get(x.target);
+    if (!it) return `<div class="qitem"><p>対象の記録が見つかりません</p><div class="row"><button type="button" class="small quiet" data-qdone="${id}">片付ける</button></div></div>`;
+    let act = "";
+    if (x.type === "link") act = `<div class="cands">${(x.cands || []).map(k => wk.get(k)).filter(Boolean).map(w => `<button type="button" data-qlink="${id}" data-wk="${w.k}">これに結び付ける：${esc(w.t)}（${esc(w.a)}・${w.y}）</button>`).join("")}<button type="button" class="quiet" data-qlink="${id}" data-wk="">結び付けない</button></div>`;
+    else if (x.type === "cat") act = `<div class="row"><select data-qcatsel="${id}">${CATS.map(c => `<option${c === it.cat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select><button type="button" class="small" data-qcat="${id}">この種類にする</button></div>`;
+    else if (x.type === "bib") act = `<div class="grid2"><label class="f">書名<input type="text" data-qbt="${id}" value="${esc(it.t.startsWith("（") ? "" : it.t)}"></label><label class="f">著者<input type="text" data-qba="${id}" value="${esc(it.a || "")}"></label></div><div class="row"><button type="button" class="small" data-qbib="${id}">保存する</button></div>`;
+    else if (x.type === "check") act = `<div class="row"><button type="button" class="small" data-qdone="${id}">このままでよい</button><button type="button" class="small quiet" data-qopen="${it.id}">書誌を直す</button></div>`;
+    else if (x.type === "unowned") act = `<div class="row"><button type="button" class="small" data-qst="${id}" data-st="own">所有に戻す</button><button type="button" class="small quiet" data-qst="${id}" data-st="gone">手放した</button><button type="button" class="small quiet" data-qst="${id}" data-st="off">外したままにする</button></div>`;
+    return `<div class="qitem"><div class="row"><span class="pill warn">${esc(QNAME[x.type] || x.type)}</span><span class="small muted">${esc(x.why || "")}</span></div>
+      <p><b>${esc(it.t)}</b> <span class="small muted">${esc(it.a || "")}${it.pub ? "・" + esc(it.pub) : ""}${it.isbn ? "・" + esc(it.isbn) : ""}</span></p>${act}</div>`;
+  }).join("") || `<p class="empty">確認待ちはありません</p>`;
+}
+$("qList").addEventListener("click", e => {
+  const t = e.target.closest("button"); if (!t) return;
+  const d = t.dataset;
+  if (d.qdone) { Lib.qDel(d.qdone); }
+  else if (d.qopen) { openDetail(d.qopen); return; }
+  else if (d.qlink) { const x = Lib.queue()[d.qlink]; const it = Lib.get(x.target); Lib.link(it, d.wk || null); Lib.qDel(d.qlink); UI.toast(d.wk ? "結び付けました" : "結び付けないことにしました"); }
+  else if (d.qcat) { const x = Lib.queue()[d.qcat]; const it = JSON.parse(JSON.stringify(Lib.get(x.target))); it.cat = document.querySelector(`[data-qcatsel="${d.qcat}"]`).value; it.catAuto = false; Lib.put(it); Lib.qDel(d.qcat); }
+  else if (d.qbib) {
+    const x = Lib.queue()[d.qbib]; const it = JSON.parse(JSON.stringify(Lib.get(x.target)));
+    const t2 = document.querySelector(`[data-qbt="${d.qbib}"]`).value.trim(); if (!t2) { UI.toast("書名を入れてください"); return; }
+    it.t = t2; it.a = document.querySelector(`[data-qba="${d.qbib}"]`).value.trim(); Lib.put(it); Lib.qDel(d.qbib);
+    const m = Biblio.matchNovel(it.t, it.a);
+    if (m.status === "auto") Lib.link(it, m.work.k); else if (m.status === "wait") Lib.qAdd("link", it.id, { why: "必読書チェッカーの作品と結び付けるか、候補から選んでください", cands: m.cands.map(w => w.k) });
+  }
+  else if (d.qst) { const x = Lib.queue()[d.qst]; const it = Lib.get(x.target); Lib.qDel(d.qst); if (d.st !== "off") Lib.setStatus(it, d.st); }
+  else return;
+  setTimeout(() => render("queue"), 50);
+});
+
+// ---------- 集計 ----------
+function bars(rows, total) {
+  return `<div class="bars">${rows.map(([k, n]) => `<span>${esc(k)}</span><span class="tr"><i style="width:${total ? Math.max(2, n / total * 100) : 0}%"></i></span><span class="mono">${n}</span>`).join("")}</div>`;
+}
+function renderStats() {
+  const own = Object.values(Lib.items()).filter(it => it.st === "own");
+  const count = it => it.kind === "series" ? Object.values(it.vols || {}).filter(v => v.own).length : 1;
+  const total = own.reduce((s, it) => s + count(it), 0);
+  const tally = f => { const m = new Map(); for (const it of own) { const k = f(it) || "（未設定）"; m.set(k, (m.get(k) || 0) + count(it)); } return [...m.entries()].sort((a, b) => b[1] - a[1]); };
+  const tsun = own.filter(it => it.kind !== "series" && !Lib.isRead(it)).length + own.filter(it => it.kind === "series").reduce((s, it) => s + Object.values(it.vols || {}).filter(v => v.own && !v.read).length, 0);
+  const works = Shelf.read(Lib.P.novels); const nd = Lib.ndoc();
+  const nOwn = Object.keys(nd.own || {}).length, nAll = works ? works.books.length : 0;
+  $("stats").innerHTML = `
+    <div class="row"><span class="pill acc">総冊数 ${total}冊</span><span class="pill">記録 ${own.length}件（シリーズ ${own.filter(x => x.kind === "series").length}）</span><span class="pill warn">積読 ${tsun}冊</span><span class="pill">必読書の所有 ${nOwn}/${nAll}冊（${nAll ? (nOwn / nAll * 100).toFixed(1) : 0}%）</span></div>
+    <h3>種類別</h3>${bars(tally(it => it.cat), total)}
+    <h3>紙・電子</h3>${bars(tally(it => it.media === "ebook" ? "電子" : "紙"), total)}
+    <h3>保管場所別</h3>${bars(tally(it => it.loc), total)}
+    <div class="row"><button type="button" class="quiet" id="exportBtn">蔵書の記録を書き出す（バックアップ）</button><span class="small muted">変更の履歴はGitHubにも残っています</span></div>`;
+  $("exportBtn").onclick = () => {
+    const body = JSON.stringify({ exported: new Date().toISOString(), library: Lib.items(), reading: Lib.reading(), settings: Lib.settings(), queue: Lib.queue() }, null, 1);
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([body], { type: "application/json" })); a.download = `shelf-蔵書-${UI.today()}.json`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  };
+}
+
+// ---------- 保管場所 ----------
+function renderPlaces() {
+  const pl = Lib.places();
+  const used = new Map(); for (const it of Object.values(Lib.items())) if (it.loc) used.set(it.loc, (used.get(it.loc) || 0) + 1);
+  $("placeList").innerHTML = Object.entries(pl).map(([code, n]) => `<li><div><div class="t">${esc(n)}</div><div class="m"><span class="mono">${code}</span><span>${used.get(n) || 0}件</span></div></div><div class="row"><button type="button" class="small quiet" data-pren="${code}">名前を変える</button><button type="button" class="small quiet" data-pdel="${code}">消す</button></div></li>`).join("") || `<li class="empty">まだありません</li>`;
+}
+$("addPlace").onclick = () => { const n = $("newPlace").value.trim(); if (!n) return; Lib.addPlace(n); $("newPlace").value = ""; setTimeout(renderPlaces, 50); };
+$("placeList").addEventListener("click", e => {
+  const r = e.target.closest("[data-pren]"), d = e.target.closest("[data-pdel]");
+  if (r) {
+    const code = r.dataset.pren, li = r.closest("li");
+    li.innerHTML = `<div class="row grow"><input type="text" class="grow" value="${esc(Lib.places()[code])}" aria-label="新しい名前"><button type="button" class="small">決定</button></div>`;
+    li.querySelector("button").onclick = () => {
+      const old = Lib.places()[code], nn = li.querySelector("input").value.trim(); if (!nn) return;
+      Lib.renamePlace(code, nn);
+      for (const it of Object.values(Lib.items())) if (it.loc === old) Lib.put({ ...JSON.parse(JSON.stringify(it)), loc: nn });
+      setTimeout(renderPlaces, 50);
+    };
+  }
+  if (d) { Lib.removePlace(d.dataset.pdel); setTimeout(renderPlaces, 50); }
+});
+$("printLabels").onclick = () => {
+  const pl = Object.entries(Lib.places()); if (!pl.length) { UI.toast("保管場所がまだありません"); return; }
+  $("labels").innerHTML = pl.map(([c, n], i) => `<figure><svg id="lb${i}"></svg><figcaption>${esc(n)}</figcaption></figure>`).join("");
+  pl.forEach(([c], i) => JsBarcode("#lb" + i, c, { format: "EAN13", height: 48, width: 1.8, fontSize: 13, margin: 4 }));
+  document.body.classList.add("printing");
+  setTimeout(() => { window.print(); document.body.classList.remove("printing"); }, 100);
+};
+
+// ---------- ブクログから ----------
+let blShown = 100;
+function booklogItems() {
+  const meta = Shelf.read("records/novels-checker/log.json") || {};
+  const out = [];
+  for (let i = 0; i < (meta.chunks || 0); i++) (Shelf.read(`records/novels-checker/log-${i}.json`)?.items || []).forEach((x, j) => out.push({ id: `${i}-${j}`, t: x[0], a: x[1], d: x[2], g: x[4], type: x[5] }));
+  return out;
+}
+function renderBooklog() {
+  const done = new Set(Object.values(Lib.items()).map(it => it.blk).filter(Boolean));
+  const q = Biblio.norm($("blq").value);
+  let rows = booklogItems().filter(x => !done.has(x.id));
+  if (q) rows = rows.filter(x => Biblio.norm(x.t + " " + x.a).includes(q));
+  $("blCount").textContent = `未登録 ${rows.length}件`;
+  $("blList").innerHTML = rows.slice(0, blShown).map(x => `<li><label class="row" style="gap:10px;align-items:flex-start"><input type="checkbox" data-bl="${x.id}"><span><span class="t">${esc(x.t)}</span><br><span class="m">${esc(x.a)}・${esc(x.d)}${x.type ? "・" + esc(x.type) : ""}</span></span></label><span></span></li>`).join("") || `<li class="empty">登録できる記録はありません</li>`;
+  $("blMore").hidden = rows.length <= blShown;
+}
+$("blq").addEventListener("input", () => { blShown = 100; renderBooklog(); });
+$("blMore").onclick = () => { blShown += 200; renderBooklog(); };
+$("blReg").onclick = async () => {
+  const ids = [...document.querySelectorAll("[data-bl]:checked")].map(x => x.dataset.bl); if (!ids.length) { UI.toast("登録する本を選んでください"); return; }
+  const all = new Map(booklogItems().map(x => [x.id, x]));
+  let n = 0;
+  for (const id of ids) {
+    const x = all.get(id); if (!x) continue;
+    const ebook = /kindle|電子|ebook/i.test(x.type || "");
+    const r = await Lib.register({ t: x.t, a: x.a, src: "booklog", media: ebook ? "ebook" : "paper", bib: { t: x.t, a: x.a } });
+    const it = JSON.parse(JSON.stringify(r.item)); it.blk = id; Lib.put(it); n++;
+  }
+  UI.toast(`${n}件を登録しました`); setTimeout(renderBooklog, 50);
+};
+
+// ---------- 外した本 ----------
+function renderOff() {
+  const rows = Object.values(Lib.items()).filter(it => it.st !== "own").sort((a, b) => (a.u < b.u ? 1 : -1));
+  $("offList").innerHTML = rows.map(it => `<li><div><div class="t">${esc(it.t)}</div><div class="m"><span>${esc(it.a || "")}</span><span class="pill ${it.st === "gone" ? "" : "warn"}">${it.st === "gone" ? "手放した" : "所有を外した"}</span></div></div><button type="button" class="small" data-back="${esc(it.id)}">所有に戻す</button></li>`).join("") || `<li class="empty">ありません</li>`;
+}
+$("offList").addEventListener("click", e => { const b = e.target.closest("[data-back]"); if (!b) return; Lib.setStatus(Lib.get(b.dataset.back), "own"); UI.toast("所有に戻しました"); setTimeout(renderOff, 50); });
