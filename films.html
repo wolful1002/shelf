@@ -466,7 +466,7 @@ details.sources summary{cursor:pointer;font-weight:700}
 <script>
 "use strict";
 (async () => {
-  const CFG = {"title": "映画チェッカー — shelf", "works": "works/films.json", "docs": {"watched": "records/films-checker/watched.json", "offlist": "records/films-checker/offlist.json", "customLists": "records/films-checker/customLists.json"}, "code": "app/legacy-films.js"};
+  const CFG = {"title": "映画チェッカー — shelf", "works": "works/films.json", "need": ["works/films.json", "records/films-checker/"], "docs": {"watched": "records/films-checker/watched.json", "offlist": "records/films-checker/offlist.json", "customLists": "records/films-checker/customLists.json"}, "code": "app/legacy-films.js"};
   const bar = document.getElementById("shelfBar");
   const msg = t => { const el = document.getElementById("shelfMsg"); if (el) { el.textContent = t; el.hidden = !t; } };
   // 保存の状態
@@ -477,7 +477,7 @@ details.sources summary{cursor:pointer;font-weight:700}
   });
   if (!Shelf.token()) { msg("鍵が設定されていません。ホームで鍵を入れてください。"); return; }
   msg("記録を読み込んでいます…");
-  await Shelf.init();
+  await Shelf.init({ need: CFG.need });
   if (!Shelf.read(CFG.works)) await Shelf.refresh();
   const data = Shelf.read(CFG.works);
   if (!data) { msg("作品データを読み込めませんでした。電波と鍵を確かめてください。"); return; }

@@ -104,8 +104,11 @@
     }
     return data;
   }
+  // 取り直し。画面に要るファイル（need）を先に、同時に6つずつ取る。要るファイルがそろった時点で needDone が解ける
+  let needRe = null, needDone = null;
   async function refresh() {
     if (refreshing) return refreshing;
+    let markNeed; needDone = new Promise(r => markNeed = r);
     refreshing = (async () => {
       if (!token()) { setStatus({ state: "notoken", msg: "鍵が未設定です" }); return; }
       if (!navigator.onLine) { setStatus({ state: "offline", msg: "電波がありません。端末の写しで動いています" }); return; }
@@ -113,27 +116,34 @@
       try {
         const v0 = new Map(ver);
         const t = await fetchTree();
-        const changed = Object.keys(t).filter(p => files.get(p)?.sha !== t[p]);
-        let i = 0;
-        for (const p of changed) {
-          i++;
-          if (changed.length > 3) setStatus({ msg: `取り直し中 ${i}/${changed.length}` });
-          if ((ver.get(p) || 0) !== (v0.get(p) || 0)) continue;   // 取り直しの間に端末で書き換えた
-          const data = await fetchBlob(t[p]);
-          if ((ver.get(p) || 0) !== (v0.get(p) || 0)) continue;
-          const pend = queue.some(o => o.path === p);
-          files.set(p, { sha: t[p], data: pend ? applyPending(p, data) : data });
-          tree[p] = t[p];
-          await persistFile(p);
-          emit(p, true);
-        }
+        const isNeed = p => !needRe || needRe.test(p);
+        const changed = Object.keys(t).filter(p => files.get(p)?.sha !== t[p]).sort((a, b) => isNeed(b) - isNeed(a));
+        let needLeft = changed.filter(isNeed).length, done = 0;
+        if (!needLeft) markNeed();
+        const one = async p => {
+          if ((ver.get(p) || 0) === (v0.get(p) || 0)) {   // 取り直しの間に端末で書き換えたファイルは飛ばす
+            const data = await fetchBlob(t[p]);
+            if ((ver.get(p) || 0) === (v0.get(p) || 0)) {
+              const pend = queue.some(o => o.path === p);
+              files.set(p, { sha: t[p], data: pend ? applyPending(p, data) : data });
+              tree[p] = t[p];
+              persistFile(p);
+              emit(p, true);
+            }
+          }
+          done++;
+          if (changed.length > 3) setStatus({ msg: `取り直し中 ${done}/${changed.length}` });
+          if (isNeed(p) && --needLeft === 0) markNeed();
+        };
+        const list = changed.slice();
+        await Promise.all(Array.from({ length: Math.min(6, list.length) }, async () => { while (list.length) await one(list.shift()); }));
         for (const p of Object.keys(t)) if (!changed.includes(p)) tree[p] = t[p];
         await idbSet("tree", tree);
         setStatus({ state: queue.length ? "pending" : "ok", msg: queue.length ? "" : "最新です" });
         if (queue.length) flush();
       } catch (e) {
         setStatus({ state: "error", msg: e.message });
-      } finally { refreshing = null; }
+      } finally { refreshing = null; markNeed(); }
     })();
     return refreshing;
   }
@@ -213,20 +223,25 @@
       if (!d) { const ua = navigator.userAgent; d = (/Android/.test(ua) ? "Android" : "パソコン") + "-" + Math.random().toString(36).slice(2, 6); LS.set("shelf.device", d); }
       return d;
     },
-    init() {
+    // need：この画面に要るファイルの先頭の並び（例 ["works/novels.json", "records/novels-checker/"]）。省くとすべて
+    init(opts = {}) {
       if (ready) return ready;
+      if (opts.need) needRe = new RegExp("^(" + opts.need.map(x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")");
       ready = (async () => {
         const t = await idbGet("tree"); if (t) tree = t;
         let q = null;
         try { q = localStorage.getItem("shelf.queueInIdb") ? await idbGet("queue") : JSON.parse(localStorage.getItem("shelf.queue") || "null"); } catch {}
         if (!q) q = await idbGet("queue");
         if (Array.isArray(q)) queue = q;
-        for (const p of Object.keys(tree)) { const f = await idbGet("f:" + p); if (f) files.set(p, f); }
+        const fs = await Promise.all(Object.keys(tree).map(async p => [p, await idbGet("f:" + p)]));
+        for (const [p, f] of fs) if (f) files.set(p, f);
         setStatus({ state: queue.length ? "pending" : "idle" });
-        const first = refresh();
-        // 電波があれば最新を取り終えるまで待つ（古い写しのまま判断しないため）。初めての端末は必ず待つ
-        if (!files.size) await first;
-        else if (navigator.onLine) await Promise.race([first, sleep(8000)]);
+        const haveNeed = files.size && [...Object.keys(tree)].filter(p => !needRe || needRe.test(p)).every(p => files.has(p));
+        refresh();
+        // 電波があれば、この画面に要るファイルの最新を待つ（古い写しのまま判断しないため）。
+        // 写しがあるときは長くても3秒で写しのまま開き、残りは後ろで取る。初めての端末は要るファイルがそろうまで待つ
+        if (!haveNeed) await needDone;
+        else if (navigator.onLine) await Promise.race([needDone, sleep(3000)]);
         addEventListener("online", () => { refresh(); flush(); });
         document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refresh(); });
         setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 90000);

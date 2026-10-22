@@ -56,7 +56,7 @@ $("keyEdit").onclick = () => { $("main").prepend(UI.keyCard()); window.scrollTo(
 
 (async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); $("notices").innerHTML = `<p class="small muted">鍵を設定すると表示されます。</p>`; return; }
-  await Shelf.init();
+  await Shelf.init({ need: ["records/library/", "records/queue.json", "records/reading.json", "records/settings.json", "records/novels-checker/books.json", "works/novels.json", "works/films.json"] });
   const ready = () => { const n = Shelf.read(Lib.P.novels), f = Shelf.read(Lib.P.films); if (n) Biblio.setNovels(n); if (f) Biblio.setFilms(f); };
   ready(); Shelf.on(Lib.P.novels, ready); Shelf.on(Lib.P.films, ready);
   Lib.reconcile();

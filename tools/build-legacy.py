@@ -9,12 +9,14 @@ PAGES = {
     "novels": {
         "title": "必読書チェッカー — shelf",
         "works": "works/novels.json",
+        "need": ["works/novels.json", "works/novels-biblio.json", "records/novels-checker/"],
         "docs": {"books": "records/novels-checker/books.json", "custom": "records/novels-checker/custom.json", "log": "records/novels-checker/log.json"},
         "logchunks": "records/novels-checker/log-{n}.json",
     },
     "films": {
         "title": "映画チェッカー — shelf",
         "works": "works/films.json",
+        "need": ["works/films.json", "records/films-checker/"],
         "docs": {"watched": "records/films-checker/watched.json", "offlist": "records/films-checker/offlist.json", "customLists": "records/films-checker/customLists.json"},
     },
 }
@@ -35,7 +37,7 @@ LOADER = r"""
   });
   if (!Shelf.token()) { msg("鍵が設定されていません。ホームで鍵を入れてください。"); return; }
   msg("記録を読み込んでいます…");
-  await Shelf.init();
+  await Shelf.init({ need: CFG.need });
   if (!Shelf.read(CFG.works)) await Shelf.refresh();
   const data = Shelf.read(CFG.works);
   if (!data) { msg("作品データを読み込めませんでした。電波と鍵を確かめてください。"); return; }
@@ -75,6 +77,20 @@ BAR = """<div id="shelfBar" style="position:sticky;top:0;z-index:60;display:flex
 <p id="shelfMsg" hidden style="padding:10px 12px;border-radius:8px;background:#f6ead2;color:#5a3d0a;font:14px system-ui,sans-serif"></p>
 """
 
+# 今のチェッカーのプログラムに当てる最小限の手直し（[元の文字列, 置き換え後]。元が見つからなければ止める）
+PATCHES = {
+    "novels": [
+        # 書名・著者の正規化を覚えておく（同じ文字列を何十万回も正規化して、開くと固まっていた）
+        ['const nz = s => String(s||"")',
+         'const NZC = new Map();\nconst nz = s => { s = String(s||""); let v = NZC.get(s); if(v === undefined){ v = nz0(s); if(NZC.size > 50000) NZC.clear(); NZC.set(s, v) } return v };\nconst nz0 = s => String(s||"")'],
+        # 照合できなかった記録の候補探しは、その欄を開いたときだけ行う
+        ['  const all = unRows(), out = [];\n  for(const it of all){\n',
+         '  const all = unRows(), out = [];\n  lgUI.unFull = !!lgUI.open.un;\n  for(const it of all){\n    if(!lgUI.open.un) break;\n'],
+        ['if(d) lgUI.open[d.dataset.lg] = d.open }',
+         'if(d){ lgUI.open[d.dataset.lg] = d.open; if(d.dataset.lg === "un" && d.open && !lgUI.unFull) renderLogUn() } }'],
+    ],
+}
+
 def build(kind, src):
     s = open(src, encoding="utf-8").read()
     body = s[s.find("<body>") + 6:]
@@ -86,6 +102,9 @@ def build(kind, src):
     code = code[:m.start()] + "const DATA = window.__DATA__;" + code[m.end() + end:]
     title_m = re.search(r"<title>(.*?)</title>", pre)
     pre = re.sub(r"<title>.*?</title>", "", pre, count=1)
+    for a, b in PATCHES.get(kind, []):
+        assert code.count(a) == 1, "手直しの元が見つかりません: " + a[:40]
+        code = code.replace(a, b)
     cfg = dict(PAGES[kind]); cfg["code"] = f"app/legacy-{kind}.js"
     bar = BAR.replace("__N__", "font-weight:700" if kind == "novels" else "opacity:.75").replace("__F__", "font-weight:700" if kind == "films" else "opacity:.75")
     # 見た目の中身（<style> と本文）の先頭に上の帯を入れる
@@ -106,7 +125,7 @@ def build(kind, src):
 </body>
 </html>
 """
-    header = f"// 今のチェッカー（{title_m.group(1) if title_m else kind}）の画面のプログラム。tools/build-legacy.py で取り出したもので、手を入れていない。\n"
+    header = f"// 今のチェッカー（{title_m.group(1) if title_m else kind}）の画面のプログラム。tools/build-legacy.py で取り出したもの。手直しは build-legacy.py の PATCHES にあるものだけ。\n"
     open(os.path.join(ROOT, f"{kind}.html"), "w", encoding="utf-8").write(html)
     open(os.path.join(ROOT, f"app/legacy-{kind}.js"), "w", encoding="utf-8").write(header + code)
     print(kind, "page", len(html), "code", len(code))

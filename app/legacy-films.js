@@ -1,4 +1,4 @@
-// 今のチェッカー（Movie List Checker）の画面のプログラム。tools/build-legacy.py で取り出したもので、手を入れていない。
+// 今のチェッカー（Movie List Checker）の画面のプログラム。tools/build-legacy.py で取り出したもの。手直しは build-legacy.py の PATCHES にあるものだけ。
 
 const DATA = window.__DATA__;;
 const ORDER = ["b1001","ss_c","ss_d","tspdt","afi","bbc_us","bbc_fl","bbc_21","nyt_21","cahiers","imdb","kj_fo09","kj_pro","kj_jp09","kj_jp100","bfi_jp","to_jp","cholic"];

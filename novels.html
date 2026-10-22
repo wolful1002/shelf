@@ -410,7 +410,7 @@ button.when{font:inherit;font-size:12px;background:none;border:0;padding:0;color
 <script>
 "use strict";
 (async () => {
-  const CFG = {"title": "必読書チェッカー — shelf", "works": "works/novels.json", "docs": {"books": "records/novels-checker/books.json", "custom": "records/novels-checker/custom.json", "log": "records/novels-checker/log.json"}, "logchunks": "records/novels-checker/log-{n}.json", "code": "app/legacy-novels.js"};
+  const CFG = {"title": "必読書チェッカー — shelf", "works": "works/novels.json", "need": ["works/novels.json", "works/novels-biblio.json", "records/novels-checker/"], "docs": {"books": "records/novels-checker/books.json", "custom": "records/novels-checker/custom.json", "log": "records/novels-checker/log.json"}, "logchunks": "records/novels-checker/log-{n}.json", "code": "app/legacy-novels.js"};
   const bar = document.getElementById("shelfBar");
   const msg = t => { const el = document.getElementById("shelfMsg"); if (el) { el.textContent = t; el.hidden = !t; } };
   // 保存の状態
@@ -421,7 +421,7 @@ button.when{font:inherit;font-size:12px;background:none;border:0;padding:0;color
   });
   if (!Shelf.token()) { msg("鍵が設定されていません。ホームで鍵を入れてください。"); return; }
   msg("記録を読み込んでいます…");
-  await Shelf.init();
+  await Shelf.init({ need: CFG.need });
   if (!Shelf.read(CFG.works)) await Shelf.refresh();
   const data = Shelf.read(CFG.works);
   if (!data) { msg("作品データを読み込めませんでした。電波と鍵を確かめてください。"); return; }

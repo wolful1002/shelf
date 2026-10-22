@@ -1,4 +1,4 @@
-// 今のチェッカー（生涯読書リスト（自分用））の画面のプログラム。tools/build-legacy.py で取り出したもので、手を入れていない。
+// 今のチェッカー（生涯読書リスト（自分用））の画面のプログラム。tools/build-legacy.py で取り出したもの。手直しは build-legacy.py の PATCHES にあるものだけ。
 
 const DATA = window.__DATA__;;
 const L = DATA.lists, ORDER = Object.keys(L), books = DATA.books;
@@ -624,7 +624,9 @@ function refreshAll(){
 function exportText(){ return JSON.stringify({app:"lifetime-books", v:3, read, want, own, custom, log:blog}) }
 
 // title matching
-const nz = s => String(s||"").normalize("NFKC").toLowerCase().replace(/ものがたり/g, "物語").replace(/^(the|a|an|le|la|les|der|die|das|el)\s+/, "").replace(/[\s・･.,，、。:：;；!！?？'’‘"“”「」『』()（）\[\]〔〕【】〈〉《》＜＞<>\-‐‑–—―ー~〜～\/／&＆*＊#＃]/g, "");
+const NZC = new Map();
+const nz = s => { s = String(s||""); let v = NZC.get(s); if(v === undefined){ v = nz0(s); if(NZC.size > 50000) NZC.clear(); NZC.set(s, v) } return v };
+const nz0 = s => String(s||"").normalize("NFKC").toLowerCase().replace(/ものがたり/g, "物語").replace(/^(the|a|an|le|la|les|der|die|das|el)\s+/, "").replace(/[\s・･.,，、。:：;；!！?？'’‘"“”「」『』()（）\[\]〔〕【】〈〉《》＜＞<>\-‐‑–—―ー~〜～\/／&＆*＊#＃]/g, "");
 const noParen = s => String(s||"").replace(/[（(〔\[【〈《<＜][^）)〕\]】〉》>＞]*[）)〕\]】〉》>＞]/g, "");
 let TIDX = new Map(), PIDX = new Map();
 function buildIndex(){
@@ -968,7 +970,9 @@ function unRows(){
 function renderLogUn(){
   const el = $("logUn"); if(!el) return;
   const all = unRows(), out = [];
+  lgUI.unFull = !!lgUI.open.un;
   for(const it of all){
+    if(!lgUI.open.un) break;
     if(out.length >= lgUI.unShown) break;
     const cs = looseCands(it);
     if(!lgUI.unAll && !cs.length) continue;
@@ -1010,7 +1014,7 @@ function searchBooks(q){
 }
 function initLog(){
   $("logFile").addEventListener("change", onLogFile);
-  $("logInfo").addEventListener("toggle", e=>{ const d = e.target.closest?.("details[data-lg]"); if(d) lgUI.open[d.dataset.lg] = d.open }, true);
+  $("logInfo").addEventListener("toggle", e=>{ const d = e.target.closest?.("details[data-lg]"); if(d){ lgUI.open[d.dataset.lg] = d.open; if(d.dataset.lg === "un" && d.open && !lgUI.unFull) renderLogUn() } }, true);
   $("logInfo").addEventListener("input", e=>{
     if(e.target.id==="unQ"){ lgUI.unQ = e.target.value; lgUI.unShown = 40; clearTimeout(lgUI.t); lgUI.t = setTimeout(()=>{ renderLogUn(); const i = $("unQ"); i.focus(); i.setSelectionRange(i.value.length, i.value.length) }, 250); return }
     if(e.target.dataset.f==="q"){
