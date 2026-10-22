@@ -380,7 +380,7 @@ function buildControls(){
   $("q").addEventListener("input", e=>{ clearTimeout(qTimer); qTimer = setTimeout(()=>{ state.q=e.target.value.trim(); state.shown=PAGE; renderList() }, 250) });
   ls.addEventListener("change", e=>{ state.list=e.target.value; state.shown=PAGE; renderList() });
   $("decade").addEventListener("change", e=>{ state.decade=e.target.value; state.shown=PAGE; renderList() });
-  $("sort").addEventListener("change", e=>{ state.sort=e.target.value; state.shown=PAGE; viewStack.length = 0; updateBack(); renderList() });
+  $("sort").addEventListener("change", e=>{ sortBefore(); state.sort=e.target.value; state.shown=PAGE; sortAfter(); renderList() });
   $("backBtn").addEventListener("click", popView);
   document.addEventListener("keydown", e=>{ if(e.key === "Escape" && viewStack.length && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) popView() });
   for(const [id,v] of WATCH_BTNS){
@@ -622,6 +622,21 @@ function updateBack(){
   b.hidden = false;
   const top = viewStack[viewStack.length-1];
   b.textContent = top.st.sort !== state.sort ? `← ${SORT_NM[top.st.sort] || "元の並び"}に戻る` : "← 前の画面に戻る";
+}
+// 並べ替え欄で並びを変えたときも、変える前の画面に戻れるようにする。
+// 続けて並べ替え欄を変えたときは、最初に変える前の画面を覚えておく。元と同じ並びに戻したら戻るボタンは消す
+const viewSig = s => JSON.stringify({...s, shown:0});
+function topRowKey(){ const h = stickyH(); for(const li of document.querySelectorAll("#reel > .row")){ if(li.getBoundingClientRect().bottom > h + 8) return li.dataset.k } return null }
+function sortBefore(){
+  const t = viewStack[viewStack.length-1];
+  if(t && t.via === "select" && t.cur === viewSig(state)) return;
+  pushView(topRowKey()); viewStack[viewStack.length-1].via = "select";
+}
+function sortAfter(){
+  const t = viewStack[viewStack.length-1];
+  if(t && viewSig(t.st) === viewSig(state)) viewStack.pop();
+  else if(t && t.via === "select") t.cur = viewSig(state);
+  updateBack();
 }
 // height of the sticky filter bar (0 on phones, where it scrolls away)
 function stickyH(){

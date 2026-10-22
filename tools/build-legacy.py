@@ -66,7 +66,8 @@ LOADER = r"""
 </script>
 """
 
-BAR = """<div id="shelfBar" style="position:sticky;top:0;z-index:60;display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:6px 10px;margin:-8px 0 12px;background:var(--paper,#fff);border-bottom:1px solid var(--line,#ddd);font:14px/1.4 system-ui,sans-serif">
+BAR = """<style>[hidden]{display:none!important}</style>
+<div id="shelfBar" style="position:sticky;top:0;z-index:60;display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:6px 10px;margin:-8px 0 12px;background:var(--paper,#fff);border-bottom:1px solid var(--line,#ddd);font:14px/1.4 system-ui,sans-serif">
 <a href="index.html" style="font-weight:700;color:inherit;text-decoration:none;margin-right:6px">shelf</a>
 <a href="index.html" style="color:inherit;opacity:.75;padding:4px 8px;text-decoration:none">ホーム</a>
 <a href="library.html" style="color:inherit;opacity:.75;padding:4px 8px;text-decoration:none">蔵書</a>
@@ -94,6 +95,14 @@ PATCHES = {
          "// 開くときは記録が順にそろうたびに一覧を描き直していたので、そろうまで描くのを待ち、最後に1回だけ描く\nvar BOOT = true;\nfunction renderAll(){ if(BOOT) return; renderSummary(); renderList(); renderPick() }\n{ const m = renderMy, l = renderLog; renderMy = () => { if(!BOOT) m() }; renderLog = () => { if(!BOOT) l() } }\nconst endBoot = () => { if(!BOOT) return; BOOT = false; renderAll(); renderMy(); renderLog(); renderBibInfo() };\nsetTimeout(endBoot, 2500);\ncustom = cRead();"],
         ["renderAll(); renderMy(); renderLog();\ninitStore();",
          "initStore().finally(endBoot);"],
+        # 並べ替え欄で並びを変えたときも、戻るボタンで変える前の画面に戻れるようにする
+        ["    $(id).addEventListener(\"change\", e=>{ st[key] = e.target.value; if(key===\"sort\"){ viewStack.length = 0; updateBack() } renderList(true) });",
+         "    $(id).addEventListener(\"change\", e=>{ if(key===\"sort\") sortBefore(); st[key] = e.target.value; if(key===\"sort\") sortAfter(); renderList(true) });"],
+        ["function updateBack(){\n  const b = $(\"backBtn\");\n  if(!viewStack.length){ b.hidden = true; return }\n  const v = viewStack[viewStack.length-1];\n  b.hidden = false; b.textContent = `← 前の画面（${SORT_NM[v.st.sort]||\"元の並び\"}）に戻る`;\n}",
+         "function updateBack(){\n  const b = $(\"backBtn\");\n  if(!viewStack.length){ b.hidden = true; return }\n  const v = viewStack[viewStack.length-1];\n  b.hidden = false; b.textContent = v.st.sort !== st.sort ? `← ${SORT_NM[v.st.sort]||\"元の並び\"}に戻る` : \"← 前の画面に戻る\";\n}\n// 並べ替え欄で並びを変えたときも、変える前の画面に戻れるようにする。\n// 続けて並べ替え欄を変えたときは、最初に変える前の画面を覚えておく。元と同じ並びに戻したら戻るボタンは消す\nconst viewSig = s => JSON.stringify({...s, shown:0});\nfunction topRowKey(){ for(const li of document.querySelectorAll(\"#list-ol > .row\")){ if(li.getBoundingClientRect().bottom > 80) return li.dataset.k } return null }\nfunction sortBefore(){\n  const t = viewStack[viewStack.length-1];\n  if(t && t.via === \"select\" && t.cur === viewSig(st)) return;\n  pushView(topRowKey()); viewStack[viewStack.length-1].via = \"select\";\n}\nfunction sortAfter(){\n  const t = viewStack[viewStack.length-1];\n  if(t && viewSig(t.st) === viewSig(st)) viewStack.pop();\n  else if(t && t.via === \"select\") t.cur = viewSig(st);\n  updateBack();\n}"],
+        # 一覧を描き直したら、戻るボタンの文言（どの並びに戻るか）も合わせる
+        ["  $(\"count\").textContent = `${rows.length}冊中 ${rows.filter(b=>read[b.k]).length}冊 読了`;\n  watchMore();\n}",
+         "  $(\"count\").textContent = `${rows.length}冊中 ${rows.filter(b=>read[b.k]).length}冊 読了`;\n  watchMore(); updateBack();\n}"],
     ],
     "films": [
         # 開くときは記録がそろうまで描くのを待ち、最後に1回だけ描く
@@ -105,6 +114,11 @@ PATCHES = {
         # 照合できなかったリスト外の鑑賞は、作品の一覧が変わるまで照合し直さない
         ["function promoteOff(){\n  if(!offlist.length) return;\n  buildIdx(films);\n  const keep = []; let moved = 0;\n  for(const o of offlist){\n    const m = matchOne({t:o.t, y:o.y});\n    if(m.f && m.how === \"ok\"){ if(!seen[m.f.k]) seen[m.f.k] = o.d || NODATE; moved++ } else keep.push(o);\n  }\n  buildIdx(BASE);",
          "// 一致しなかった記録は、作品の一覧が変わるまで照合し直さない（開くたびに1,000件以上を照合して重かった）\nlet OFFMISS = null;\nfunction promoteOff(){\n  if(!offlist.length) return;\n  const sig = films.length + \"|\" + Object.entries(customs).map(([k,c])=>k+\":\"+(c.include?1:0)+\":\"+((c.items||[]).length)).join(\",\");\n  if(!OFFMISS){ try{ const x = JSON.parse(localStorage.getItem(\"shelf.offMiss\")||\"null\"); OFFMISS = x && x.sig === sig ? Object.assign(new Set(x.miss), {sig}) : null }catch(_){} }\n  if(OFFMISS && OFFMISS.sig !== sig) OFFMISS = null;\n  const okey = o => (o.t||\"\") + \"\\t\" + (o.y||\"\");\n  if(OFFMISS && offlist.every(o=>OFFMISS.has(okey(o)))) return;\n  buildIdx(films);\n  const keep = []; let moved = 0; const miss = new Set();\n  for(const o of offlist){\n    if(OFFMISS && OFFMISS.has(okey(o))){ keep.push(o); miss.add(okey(o)); continue }\n    const m = matchOne({t:o.t, y:o.y});\n    if(m.f && m.how === \"ok\"){ if(!seen[m.f.k]) seen[m.f.k] = o.d || NODATE; moved++ } else { keep.push(o); miss.add(okey(o)) }\n  }\n  OFFMISS = miss; OFFMISS.sig = sig;\n  try{ localStorage.setItem(\"shelf.offMiss\", JSON.stringify({sig, miss:[...miss]})) }catch(_){}\n  buildIdx(BASE);"],
+        # 並べ替え欄で並びを変えたときも、戻るボタンで変える前の画面に戻れるようにする
+        ["  $(\"sort\").addEventListener(\"change\", e=>{ state.sort=e.target.value; state.shown=PAGE; viewStack.length = 0; updateBack(); renderList() });",
+         "  $(\"sort\").addEventListener(\"change\", e=>{ sortBefore(); state.sort=e.target.value; state.shown=PAGE; sortAfter(); renderList() });"],
+        ["  b.textContent = top.st.sort !== state.sort ? `← ${SORT_NM[top.st.sort] || \"元の並び\"}に戻る` : \"← 前の画面に戻る\";\n}",
+         "  b.textContent = top.st.sort !== state.sort ? `← ${SORT_NM[top.st.sort] || \"元の並び\"}に戻る` : \"← 前の画面に戻る\";\n}\n// 並べ替え欄で並びを変えたときも、変える前の画面に戻れるようにする。\n// 続けて並べ替え欄を変えたときは、最初に変える前の画面を覚えておく。元と同じ並びに戻したら戻るボタンは消す\nconst viewSig = s => JSON.stringify({...s, shown:0});\nfunction topRowKey(){ const h = stickyH(); for(const li of document.querySelectorAll(\"#reel > .row\")){ if(li.getBoundingClientRect().bottom > h + 8) return li.dataset.k } return null }\nfunction sortBefore(){\n  const t = viewStack[viewStack.length-1];\n  if(t && t.via === \"select\" && t.cur === viewSig(state)) return;\n  pushView(topRowKey()); viewStack[viewStack.length-1].via = \"select\";\n}\nfunction sortAfter(){\n  const t = viewStack[viewStack.length-1];\n  if(t && viewSig(t.st) === viewSig(state)) viewStack.pop();\n  else if(t && t.via === \"select\") t.cur = viewSig(state);\n  updateBack();\n}"],
     ],
 }
 

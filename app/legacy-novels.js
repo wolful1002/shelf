@@ -208,7 +208,7 @@ function buildControls(){
   $("pTier").innerHTML = `<option value="">優先度：すべて</option>` + TIERS.map(t=>`<option value="${t.id}">${t.nm}</option>`).join("");
   $("q").addEventListener("input", e=>{ st.q = e.target.value.trim().toLowerCase(); renderList(true) });
   for(const [id,key] of [["list","list"],["cty","cty"],["era","era"],["tr","tr"],["kd","kd"],["gn","gn"],["sort","sort"]])
-    $(id).addEventListener("change", e=>{ st[key] = e.target.value; if(key==="sort"){ viewStack.length = 0; updateBack() } renderList(true) });
+    $(id).addEventListener("change", e=>{ if(key==="sort") sortBefore(); st[key] = e.target.value; if(key==="sort") sortAfter(); renderList(true) });
   const segs = [["fAll","all"],["fTodo","todo"],["fWant","want"],["fDone","done"],["fOwn","own"],["fTsun","tsundoku"]];
   for(const [id,v] of segs) $(id).addEventListener("click", ()=>{
     st.status = v; segs.forEach(([b])=>$(b).setAttribute("aria-pressed", b===id)); renderList(true) });
@@ -396,7 +396,22 @@ function updateBack(){
   const b = $("backBtn");
   if(!viewStack.length){ b.hidden = true; return }
   const v = viewStack[viewStack.length-1];
-  b.hidden = false; b.textContent = `← 前の画面（${SORT_NM[v.st.sort]||"元の並び"}）に戻る`;
+  b.hidden = false; b.textContent = v.st.sort !== st.sort ? `← ${SORT_NM[v.st.sort]||"元の並び"}に戻る` : "← 前の画面に戻る";
+}
+// 並べ替え欄で並びを変えたときも、変える前の画面に戻れるようにする。
+// 続けて並べ替え欄を変えたときは、最初に変える前の画面を覚えておく。元と同じ並びに戻したら戻るボタンは消す
+const viewSig = s => JSON.stringify({...s, shown:0});
+function topRowKey(){ for(const li of document.querySelectorAll("#list-ol > .row")){ if(li.getBoundingClientRect().bottom > 80) return li.dataset.k } return null }
+function sortBefore(){
+  const t = viewStack[viewStack.length-1];
+  if(t && t.via === "select" && t.cur === viewSig(st)) return;
+  pushView(topRowKey()); viewStack[viewStack.length-1].via = "select";
+}
+function sortAfter(){
+  const t = viewStack[viewStack.length-1];
+  if(t && viewSig(t.st) === viewSig(st)) viewStack.pop();
+  else if(t && t.via === "select") t.cur = viewSig(st);
+  updateBack();
 }
 function popView(){
   const v = viewStack.pop(); if(!v) return;
@@ -435,7 +450,7 @@ function renderList(reset){
   shown = Math.min(Math.max(shown, STEP), Math.max(rows.length, STEP));
   $("list-ol").innerHTML = rows.length ? rowsHTML(0, shown) + moreHTML() : `<li class="empty">条件に合う作品はありません。</li>`;
   $("count").textContent = `${rows.length}冊中 ${rows.filter(b=>read[b.k]).length}冊 読了`;
-  watchMore();
+  watchMore(); updateBack();
 }
 function showMore(n){
   const from = shown; if(from >= lastRows.length) return;
