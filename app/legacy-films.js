@@ -641,7 +641,8 @@ function sortAfter(){
 // height of the sticky filter bar (0 on phones, where it scrolls away)
 function stickyH(){
   const c = document.querySelector(".controls");
-  return c && getComputedStyle(c).position === "sticky" ? c.getBoundingClientRect().height : 0;
+  if(!c) return 0; const cs = getComputedStyle(c);
+  return cs.position === "sticky" ? (parseFloat(cs.top) || 0) + c.getBoundingClientRect().height : 0;
 }
 // Rows far from the screen are laid out with an estimated height until they are drawn,
 // so one scroll can land in the wrong place. Keep nudging until the element stays put.

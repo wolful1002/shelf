@@ -6,16 +6,28 @@
 <title>shelf</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="app/icon.svg" type="image/svg+xml">
-<meta name="theme-color" content="#365a7c">
+<meta name="theme-color" content="#fbfcfd">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@600;900&family=BIZ+UDPGothic:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="app/ui.css">
+<link rel="stylesheet" href="app/bar.css">
 </head>
 <body>
 <main class="wrap" id="main">
+  <header class="phead">
+    <div>
+      <div class="eyebrow">SHELF</div>
+      <h1>鑑賞・蔵書記録</h1>
+      <p class="lede">本棚の所持確認と、確認待ちのお知らせ。蔵書・必読書・映画の記録は、どの画面からでも同じものを読み書きします。</p>
+    </div>
+    <div class="meter"><div class="big" id="homeBig">–</div><div class="sub">冊を所有</div></div>
+  </header>
   <section class="card" id="checkCard" aria-labelledby="checkH">
     <div class="row"><h2 id="checkH" class="grow">所持確認</h2><a class="btn quiet small" href="library.html#register">登録の画面へ</a></div>
     <p class="small muted">バーコードを読むと、持っているかどうかをすぐ表示します。ここでは登録はしません。</p>
     <div class="row">
-      <button type="button" id="camBtn">カメラで読む</button>
+      <button type="button" class="pri" id="camBtn">カメラで読む</button>
       <button type="button" id="camStop" class="quiet" hidden>カメラを止める</button>
       <span class="pill" id="engine" hidden></span>
     </div>
@@ -78,6 +90,7 @@ function renderNotices() {
   if (st.state === "error") rows.push(`<p><span class="pill ng">保存の問題</span> ${esc(st.msg)}</p>`);
   rows.push(`<p class="small muted">蔵書 ${own.length}件（うち積読 ${own.filter(Lib.isUnreadOwned).length}件）</p>`);
   $("notices").innerHTML = rows.join("");
+  const sum = Lib.ownSummary(); $("homeBig").innerHTML = `${sum.books}<small> 冊</small>`; document.querySelector(".phead .sub").textContent = `を所有・うち積読 ${sum.tsun}件`;
 }
 
 // ---------- 所持確認 ----------

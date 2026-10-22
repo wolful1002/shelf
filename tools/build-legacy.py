@@ -67,15 +67,9 @@ LOADER = r"""
 """
 
 BAR = """<style>[hidden]{display:none!important}</style>
-<div id="shelfBar" style="position:sticky;top:0;z-index:60;display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:6px 10px;margin:-8px 0 12px;background:var(--paper,#fff);border-bottom:1px solid var(--line,#ddd);font:14px/1.4 system-ui,sans-serif">
-<a href="index.html" style="font-weight:700;color:inherit;text-decoration:none;margin-right:6px">shelf</a>
-<a href="index.html" style="color:inherit;opacity:.75;padding:4px 8px;text-decoration:none">ホーム</a>
-<a href="library.html" style="color:inherit;opacity:.75;padding:4px 8px;text-decoration:none">蔵書</a>
-<a href="novels.html" style="color:inherit;padding:4px 8px;text-decoration:none;__N__">必読書</a>
-<a href="films.html" style="color:inherit;padding:4px 8px;text-decoration:none;__F__">映画</a>
-<span id="shelfSync" style="margin-left:auto;font-size:12px;opacity:.8">…</span>
-</div>
-<p id="shelfMsg" hidden style="padding:10px 12px;border-radius:8px;background:#f6ead2;color:#5a3d0a;font:14px system-ui,sans-serif"></p>
+<link rel="stylesheet" href="app/bar.css">
+<div id="shelfBar" class="shelfbar"><div class="sb-in"><a class="sb-brand" href="index.html">shelf</a><nav aria-label="画面"><a href="index.html">ホーム</a><a href="library.html">蔵書</a><a href="novels.html"__N__>必読書</a><a href="films.html"__F__>映画</a></nav><span id="shelfSync" class="sb-sync" role="status">…</span></div></div>
+<p id="shelfMsg" class="shelfmsg" hidden></p>
 """
 
 # 今のチェッカーのプログラムに当てる最小限の手直し（[元の文字列, 置き換え後]。元が見つからなければ止める）
@@ -103,6 +97,11 @@ PATCHES = {
         # 一覧を描き直したら、戻るボタンの文言（どの並びに戻るか）も合わせる
         ["  $(\"count\").textContent = `${rows.length}冊中 ${rows.filter(b=>read[b.k]).length}冊 読了`;\n  watchMore();\n}",
          "  $(\"count\").textContent = `${rows.length}冊中 ${rows.filter(b=>read[b.k]).length}冊 読了`;\n  watchMore(); updateBack();\n}"],
+        # 並べ替え欄で並びを変えても、見ていた作品を同じ位置に出す
+        ["    $(id).addEventListener(\"change\", e=>{ if(key===\"sort\") sortBefore(); st[key] = e.target.value; if(key===\"sort\") sortAfter(); renderList(true) });",
+         "    $(id).addEventListener(\"change\", e=>{\n      if(key!==\"sort\"){ st[key] = e.target.value; renderList(true); return }\n      const a = anchorRow(); sortBefore(); st.sort = e.target.value; sortAfter(); renderList(true);\n      if(a){ ensureRow(a.k); settleRow(a.k, a.top) }\n    });"],
+        ["const viewSig = s => JSON.stringify({...s, shown:0});",
+         "const viewSig = s => JSON.stringify({...s, shown:0});\n// 並べ替え欄で並びを変えても、画面のいちばん上に見えていた作品を同じ位置に出す（映画と同じ）\nfunction stickyH(){\n  const c = document.querySelector(\".controls\"); if(!c) return 0;\n  const cs = getComputedStyle(c); return cs.position === \"sticky\" ? (parseFloat(cs.top) || 0) + c.getBoundingClientRect().height : 0;\n}\nfunction anchorRow(){\n  if(window.scrollY < 200) return null;\n  const h = stickyH();\n  for(const li of document.querySelectorAll(\"#list-ol > .row\")){ const r = li.getBoundingClientRect(); if((r.top + r.bottom) / 2 > h) return {k:li.dataset.k, top:r.top} }\n  return null;\n}\nlet settleId = 0;\nfunction settleRow(k, top){\n  const id = ++settleId; let n = 0, still = 0;\n  const step = () => {\n    if(id !== settleId) return;\n    const li = document.querySelector(`.row[data-k=\"${k}\"]`); if(!li) return;\n    const d = li.getBoundingClientRect().top - top;\n    if(Math.abs(d) > 1){ window.scrollBy(0, d); still = 0 } else still++;\n    if(++n < 40 && still < 3) requestAnimationFrame(step);\n  };\n  step();\n}\nfor(const ev of [\"wheel\",\"touchmove\"]) window.addEventListener(ev, ()=>{ settleId++ }, {passive:true});"],
     ],
     "films": [
         # 開くときは記録がそろうまで描くのを待ち、最後に1回だけ描く
@@ -119,6 +118,9 @@ PATCHES = {
          "  $(\"sort\").addEventListener(\"change\", e=>{ sortBefore(); state.sort=e.target.value; state.shown=PAGE; sortAfter(); renderList() });"],
         ["  b.textContent = top.st.sort !== state.sort ? `← ${SORT_NM[top.st.sort] || \"元の並び\"}に戻る` : \"← 前の画面に戻る\";\n}",
          "  b.textContent = top.st.sort !== state.sort ? `← ${SORT_NM[top.st.sort] || \"元の並び\"}に戻る` : \"← 前の画面に戻る\";\n}\n// 並べ替え欄で並びを変えたときも、変える前の画面に戻れるようにする。\n// 続けて並べ替え欄を変えたときは、最初に変える前の画面を覚えておく。元と同じ並びに戻したら戻るボタンは消す\nconst viewSig = s => JSON.stringify({...s, shown:0});\nfunction topRowKey(){ const h = stickyH(); for(const li of document.querySelectorAll(\"#reel > .row\")){ if(li.getBoundingClientRect().bottom > h + 8) return li.dataset.k } return null }\nfunction sortBefore(){\n  const t = viewStack[viewStack.length-1];\n  if(t && t.via === \"select\" && t.cur === viewSig(state)) return;\n  pushView(topRowKey()); viewStack[viewStack.length-1].via = \"select\";\n}\nfunction sortAfter(){\n  const t = viewStack[viewStack.length-1];\n  if(t && viewSig(t.st) === viewSig(state)) viewStack.pop();\n  else if(t && t.via === \"select\") t.cur = viewSig(state);\n  updateBack();\n}"],
+        # 固定表示の絞り込み欄の下端を、上の帯の高さも含めて測る
+        ["  return c && getComputedStyle(c).position === \"sticky\" ? c.getBoundingClientRect().height : 0;",
+         "  if(!c) return 0; const cs = getComputedStyle(c);\n  return cs.position === \"sticky\" ? (parseFloat(cs.top) || 0) + c.getBoundingClientRect().height : 0;"],
     ],
 }
 
@@ -137,7 +139,7 @@ def build(kind, src):
         assert code.count(a) == 1, "手直しの元が見つかりません: " + a[:40]
         code = code.replace(a, b)
     cfg = dict(PAGES[kind]); cfg["code"] = f"app/legacy-{kind}.js"
-    bar = BAR.replace("__N__", "font-weight:700" if kind == "novels" else "opacity:.75").replace("__F__", "font-weight:700" if kind == "films" else "opacity:.75")
+    bar = BAR.replace("__N__", ' aria-current="page"' if kind == "novels" else "").replace("__F__", ' aria-current="page"' if kind == "films" else "")
     # 見た目の中身（<style> と本文）の先頭に上の帯を入れる
     parts = re.split(r"(</style>)", pre, maxsplit=1)
     first_markup = parts[0] + parts[1] + bar + parts[2] if len(parts) == 3 else bar + pre

@@ -232,15 +232,9 @@ button.when{font:inherit;font-size:12px;background:none;border:0;padding:0;color
 .mylist .src span.acts2{display:flex;gap:6px}
 @media (prefers-reduced-motion:reduce){.bar i{transition:none}}
 </style><style>[hidden]{display:none!important}</style>
-<div id="shelfBar" style="position:sticky;top:0;z-index:60;display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:6px 10px;margin:-8px 0 12px;background:var(--paper,#fff);border-bottom:1px solid var(--line,#ddd);font:14px/1.4 system-ui,sans-serif">
-<a href="index.html" style="font-weight:700;color:inherit;text-decoration:none;margin-right:6px">shelf</a>
-<a href="index.html" style="color:inherit;opacity:.75;padding:4px 8px;text-decoration:none">ホーム</a>
-<a href="library.html" style="color:inherit;opacity:.75;padding:4px 8px;text-decoration:none">蔵書</a>
-<a href="novels.html" style="color:inherit;padding:4px 8px;text-decoration:none;font-weight:700">必読書</a>
-<a href="films.html" style="color:inherit;padding:4px 8px;text-decoration:none;opacity:.75">映画</a>
-<span id="shelfSync" style="margin-left:auto;font-size:12px;opacity:.8">…</span>
-</div>
-<p id="shelfMsg" hidden style="padding:10px 12px;border-radius:8px;background:#f6ead2;color:#5a3d0a;font:14px system-ui,sans-serif"></p>
+<link rel="stylesheet" href="app/bar.css">
+<div id="shelfBar" class="shelfbar"><div class="sb-in"><a class="sb-brand" href="index.html">shelf</a><nav aria-label="画面"><a href="index.html">ホーム</a><a href="library.html">蔵書</a><a href="novels.html" aria-current="page">必読書</a><a href="films.html">映画</a></nav><span id="shelfSync" class="sb-sync" role="status">…</span></div></div>
+<p id="shelfMsg" class="shelfmsg" hidden></p>
 
 
 <div class="wrap">

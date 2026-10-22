@@ -6,18 +6,23 @@
 <title>蔵書 — shelf</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="app/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@600;900&family=BIZ+UDPGothic:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="app/ui.css">
+<link rel="stylesheet" href="app/bar.css">
 <style>
-.tabs{display:flex;gap:4px;flex-wrap:wrap}
-.tabs a{text-decoration:none;color:var(--muted);padding:6px 10px;border-radius:8px;font-size:14px;border:1px solid var(--line);background:var(--card)}
-.tabs a[aria-current="true"]{background:var(--fg);color:var(--card);border-color:var(--fg)}
+.tabs{display:flex;border:1px solid var(--line);border-radius:6px;overflow-x:auto;scrollbar-width:none;background:var(--card);width:max-content;max-width:100%;min-width:0;position:sticky;top:calc(44px + env(safe-area-inset-top,0px) + 8px);z-index:5}
+.tabs a{flex:0 0 auto;white-space:nowrap;text-decoration:none;color:var(--muted);padding:7px 12px;font-size:13px;border-right:1px solid var(--line)}
+.tabs a:last-child{border-right:0}
+.tabs a[aria-current="true"]{background:var(--fg);color:var(--card)}
 .tabs .n{font-size:11px;margin-left:4px}
 .panel[hidden]{display:none}
 .cover{width:44px;height:62px;object-fit:cover;border-radius:3px;background:var(--soft)}
 .li-wrap{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center}
 .chip{all:unset;cursor:pointer;border-bottom:1px dotted var(--muted)}
 .chip:focus-visible{outline:2px solid var(--accent)}
-.backbtn{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom));z-index:40;border-radius:99px;background:var(--fg);color:var(--card);border-color:var(--fg)}
+.backbtn{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom));z-index:40;border-radius:999px;background:var(--fg);color:var(--card);border-color:var(--fg);font-weight:700;padding:10px 18px;box-shadow:0 4px 18px rgba(0,0,0,.25)}
 .labels{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
 .labels figure{margin:0;background:#fff;color:#000;border:1px dashed #999;border-radius:6px;padding:8px;text-align:center;break-inside:avoid}
 .labels svg{max-width:100%;height:auto}
@@ -28,14 +33,21 @@
   .labels figure{border:1px dashed #999}
 }
 #printArea{display:none}
-.qitem{border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:8px}
+.qitem{border:1px solid var(--line);border-radius:6px;padding:12px;display:grid;gap:8px}
 .cands{display:grid;gap:6px}
 .cands button{justify-content:flex-start;text-align:left;font-weight:500;border-color:var(--line);background:var(--card)}
 </style>
 </head>
 <body>
 <main class="wrap" id="main">
-  <div class="row"><h1 class="grow">蔵書</h1></div>
+  <header class="phead">
+    <div>
+      <div class="eyebrow" id="eyebrow">LIBRARY</div>
+      <h1>蔵書</h1>
+      <p class="lede">手持ちの本の記録です。バーコードを読むだけで登録でき、必読書チェッカーの「所有」とつながっています。</p>
+    </div>
+    <div class="meter"><div class="big" id="libBig">–</div><div class="sub" id="libSub">冊を所有</div></div>
+  </header>
   <nav class="tabs noprint" aria-label="蔵書の画面">
     <a href="#register" data-tab="register">登録</a>
     <a href="#list" data-tab="list">一覧</a>
@@ -56,7 +68,7 @@
       <label class="f grow">今の保管場所（場所ラベルを読むと切り替わります）<select id="curLoc"></select></label>
     </div>
     <div class="row">
-      <button type="button" id="camBtn">カメラで読む</button>
+      <button type="button" class="pri" id="camBtn">カメラで読む</button>
       <button type="button" id="camStop" class="quiet" hidden>カメラを止める</button>
       <span class="pill" id="engine" hidden></span>
     </div>
@@ -64,7 +76,7 @@
     <input type="text" id="scanIn" inputmode="numeric" autocomplete="off" placeholder="ここをクリックしてからスキャナーで読む（ISBNを入れてEnterでも可）" aria-label="バーコードの番号">
     <p class="small muted">上段（978…）で登録し、続けて下段（192…）を読むと、本の種類と判型がより正確になります。同じ本を読むと「所持済み」と出ます。</p>
     <div id="batchBox" hidden class="card" style="background:var(--bg)">
-      <div class="row"><h3 class="grow">ためた番号 <span id="batchN"></span></h3><button type="button" id="batchReg">まとめて登録</button><button type="button" class="quiet" id="batchClear">すべて消す</button></div>
+      <div class="row"><h3 class="grow">ためた番号 <span id="batchN"></span></h3><button type="button" class="pri" id="batchReg">まとめて登録</button><button type="button" class="quiet" id="batchClear">すべて消す</button></div>
       <ul class="list" id="batchList"></ul>
     </div>
     <h3>読み取りの記録</h3>
@@ -82,7 +94,7 @@
         <label class="f">種類<select id="mc"></select></label>
         <label class="f">出版社<input type="text" id="mp"></label>
       </div>
-      <div class="row" style="margin-top:8px"><button type="button" id="mSave">登録する</button></div>
+      <div class="row" style="margin-top:8px"><button type="button" class="pri" id="mSave">登録する</button></div>
     </details>
   </section>
 
@@ -127,7 +139,7 @@
   <!-- ブクログ -->
   <section class="panel card" id="p-booklog" aria-label="ブクログから" hidden>
     <p class="small muted">必読書チェッカーに取り込んであるブクログの記録から、持っている本を選んで蔵書に登録します。登録済みのものは出ません。</p>
-    <div class="row"><input type="search" id="blq" class="grow" placeholder="書名・著者で絞る" aria-label="ブクログの記録を絞る"><button type="button" id="blReg">選んだ本を登録</button></div>
+    <div class="row"><input type="search" id="blq" class="grow" placeholder="書名・著者で絞る" aria-label="ブクログの記録を絞る"><button type="button" class="pri" id="blReg">選んだ本を登録</button></div>
     <p class="small muted" id="blCount"></p>
     <ul class="list" id="blList"></ul>
     <div class="row" style="justify-content:center"><button type="button" class="quiet" id="blMore" hidden>さらに表示</button></div>

@@ -1,0 +1,32 @@
+/* すべての画面で共通の上の帯（ホーム・蔵書・必読書・映画）。どの画面でも同じ位置・同じ見た目にする
+   前提：body の余白は上 28px・左右 max(16px, 安全領域)（チェッカーの画面と同じ） */
+.shelfbar{
+  --sb-bg:#fbfcfd; --sb-ink:#1b2233; --sb-muted:#5d6676; --sb-line:#d3d8df; --sb-ok:#2b6656; --sb-warn:#8a5a12; --sb-ng:#a33a2c;
+  position:sticky;top:0;z-index:60;box-sizing:border-box;
+  margin:-28px calc(-1 * max(16px, env(safe-area-inset-right, 0px))) 24px calc(-1 * max(16px, env(safe-area-inset-left, 0px)));
+  padding:env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
+  background:var(--sb-bg);color:var(--sb-ink);border-bottom:1px solid var(--sb-line);
+  font:14px/1.4 "BIZ UDPGothic","Hiragino Sans","Yu Gothic",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){.shelfbar{--sb-bg:#1a1f28;--sb-ink:#e6e9ef;--sb-muted:#98a1b0;--sb-line:#2c3340;--sb-ok:#79c4ab;--sb-warn:#e3b64d;--sb-ng:#ef9488}}
+.shelfbar .sb-in{max-width:1060px;height:44px;margin:0 auto;display:flex;align-items:stretch;gap:2px;min-width:0}
+.shelfbar .sb-brand{display:flex;align-items:center;margin-right:10px;font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-weight:500;letter-spacing:.06em;color:var(--sb-ink);text-decoration:none}
+.shelfbar nav{display:flex;align-items:stretch;gap:2px;min-width:0}
+.shelfbar nav a{display:flex;align-items:center;padding:0 10px;color:var(--sb-muted);text-decoration:none;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-1px}
+.shelfbar nav a:hover{color:var(--sb-ink)}
+.shelfbar nav a[aria-current="page"]{color:var(--sb-ink);font-weight:700;border-bottom-color:var(--sb-ink)}
+.shelfbar a:focus-visible{outline:2px solid var(--sb-ink);outline-offset:-2px}
+.shelfbar .sb-sync{margin-left:auto;align-self:center;font-size:12px;color:var(--sb-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;padding-left:8px}
+.shelfbar .sb-sync::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--sb-line);margin-right:6px;vertical-align:1px}
+.shelfbar .sb-sync[data-state="ok"]::before{background:var(--sb-ok)}
+.shelfbar .sb-sync[data-state="syncing"]::before,.shelfbar .sb-sync[data-state="pending"]::before,.shelfbar .sb-sync[data-state="offline"]::before{background:var(--sb-warn)}
+.shelfbar .sb-sync[data-state="pending"],.shelfbar .sb-sync[data-state="offline"]{color:var(--sb-warn)}
+.shelfbar .sb-sync[data-state="error"],.shelfbar .sb-sync[data-state="notoken"]{color:var(--sb-ng)}
+.shelfbar .sb-sync[data-state="error"]::before,.shelfbar .sb-sync[data-state="notoken"]::before{background:var(--sb-ng)}
+@media (max-width:420px){.shelfbar .sb-brand{display:none}.shelfbar nav a{padding:0 8px}}
+/* 帯の下に、各画面の固定表示の絞り込み欄が来るようにする */
+.controls{top:calc(44px + env(safe-area-inset-top, 0px)) !important}
+body{margin:0}
+body::before{display:none}
+.shelfmsg{padding:10px 12px;border-radius:6px;background:#f6ead2;color:#5a3d0a;font:14px/1.5 "BIZ UDPGothic",system-ui,sans-serif;max-width:1060px;margin:0 auto 16px}
+@media print{.shelfbar{display:none!important}}

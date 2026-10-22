@@ -74,6 +74,12 @@
     else L.setReading("b:" + it.id, on ? { s: "read", d: date || undefined, via: "manual", n: 1 } : null);
   };
   L.isUnreadOwned = it => it.st === "own" && !L.isRead(it);
+  // 所有している冊数（シリーズは持っている巻の数）と、うち積読の冊数。画面の見出しの数字に使う
+  L.ownSummary = () => {
+    const own = Object.values(L.items()).filter(x => x.st === "own");
+    const n = it => it.kind === "series" ? Object.values(it.vols || {}).filter(v => v.own).length : 1;
+    return { books: own.reduce((s, it) => s + n(it), 0), records: own.length, tsun: own.filter(L.isUnreadOwned).length };
+  };
 
   // ---------- 確認待ち ----------
   L.queue = () => Shelf.read(P.queue)?.items || {};

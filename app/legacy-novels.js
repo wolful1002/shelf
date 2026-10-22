@@ -208,7 +208,11 @@ function buildControls(){
   $("pTier").innerHTML = `<option value="">優先度：すべて</option>` + TIERS.map(t=>`<option value="${t.id}">${t.nm}</option>`).join("");
   $("q").addEventListener("input", e=>{ st.q = e.target.value.trim().toLowerCase(); renderList(true) });
   for(const [id,key] of [["list","list"],["cty","cty"],["era","era"],["tr","tr"],["kd","kd"],["gn","gn"],["sort","sort"]])
-    $(id).addEventListener("change", e=>{ if(key==="sort") sortBefore(); st[key] = e.target.value; if(key==="sort") sortAfter(); renderList(true) });
+    $(id).addEventListener("change", e=>{
+      if(key!=="sort"){ st[key] = e.target.value; renderList(true); return }
+      const a = anchorRow(); sortBefore(); st.sort = e.target.value; sortAfter(); renderList(true);
+      if(a){ ensureRow(a.k); settleRow(a.k, a.top) }
+    });
   const segs = [["fAll","all"],["fTodo","todo"],["fWant","want"],["fDone","done"],["fOwn","own"],["fTsun","tsundoku"]];
   for(const [id,v] of segs) $(id).addEventListener("click", ()=>{
     st.status = v; segs.forEach(([b])=>$(b).setAttribute("aria-pressed", b===id)); renderList(true) });
@@ -401,6 +405,30 @@ function updateBack(){
 // 並べ替え欄で並びを変えたときも、変える前の画面に戻れるようにする。
 // 続けて並べ替え欄を変えたときは、最初に変える前の画面を覚えておく。元と同じ並びに戻したら戻るボタンは消す
 const viewSig = s => JSON.stringify({...s, shown:0});
+// 並べ替え欄で並びを変えても、画面のいちばん上に見えていた作品を同じ位置に出す（映画と同じ）
+function stickyH(){
+  const c = document.querySelector(".controls"); if(!c) return 0;
+  const cs = getComputedStyle(c); return cs.position === "sticky" ? (parseFloat(cs.top) || 0) + c.getBoundingClientRect().height : 0;
+}
+function anchorRow(){
+  if(window.scrollY < 200) return null;
+  const h = stickyH();
+  for(const li of document.querySelectorAll("#list-ol > .row")){ const r = li.getBoundingClientRect(); if((r.top + r.bottom) / 2 > h) return {k:li.dataset.k, top:r.top} }
+  return null;
+}
+let settleId = 0;
+function settleRow(k, top){
+  const id = ++settleId; let n = 0, still = 0;
+  const step = () => {
+    if(id !== settleId) return;
+    const li = document.querySelector(`.row[data-k="${k}"]`); if(!li) return;
+    const d = li.getBoundingClientRect().top - top;
+    if(Math.abs(d) > 1){ window.scrollBy(0, d); still = 0 } else still++;
+    if(++n < 40 && still < 3) requestAnimationFrame(step);
+  };
+  step();
+}
+for(const ev of ["wheel","touchmove"]) window.addEventListener(ev, ()=>{ settleId++ }, {passive:true});
 function topRowKey(){ for(const li of document.querySelectorAll("#list-ol > .row")){ if(li.getBoundingClientRect().bottom > 80) return li.dataset.k } return null }
 function sortBefore(){
   const t = viewStack[viewStack.length-1];

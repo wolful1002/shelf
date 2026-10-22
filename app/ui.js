@@ -8,19 +8,16 @@
   U.nowIso = () => new Date().toISOString();
 
   const PAGES = [["index.html", "ホーム"], ["library.html", "蔵書"], ["novels.html", "必読書"], ["films.html", "映画"]];
+  // 上の帯：チェッカーの画面と同じもの（見た目は app/bar.css）
   U.topbar = active => {
-    const el = document.createElement("header");
-    el.className = "topbar noprint";
-    el.innerHTML = `<div class="in"><a class="brand" href="index.html">shelf</a><nav aria-label="画面">${PAGES.map(([h, n]) => `<a href="${h}"${h === active ? ' aria-current="page"' : ""}>${n}</a>`).join("")}</nav><span class="sync pill" id="syncPill" role="status">…</span></div>`;
+    const el = document.createElement("div");
+    el.className = "shelfbar noprint"; el.id = "shelfBar";
+    el.innerHTML = `<div class="sb-in"><a class="sb-brand" href="index.html">shelf</a><nav aria-label="画面">${PAGES.map(([h, n]) => `<a href="${h}"${h === active ? ' aria-current="page"' : ""}>${n}</a>`).join("")}</nav><span class="sb-sync" id="shelfSync" role="status">…</span></div>`;
     document.body.prepend(el);
-    const pill = el.querySelector("#syncPill");
+    const pill = el.querySelector("#shelfSync");
     Shelf.onStatus(s => {
-      const map = {
-        ok: ["ok", "保存済み"], idle: ["", "準備中"], syncing: ["acc", s.msg || "通信中"], pending: ["warn", `送信待ち ${s.pending}件`],
-        offline: ["warn", s.pending ? `電波なし・送信待ち ${s.pending}件` : "電波なし"], error: ["ng", "保存できていません"], notoken: ["ng", "鍵が未設定"],
-      };
-      const [cls, text] = map[s.state] || ["", s.state];
-      pill.className = "sync pill " + cls; pill.textContent = text; pill.title = s.msg || "";
+      const m = { ok: "保存済み", idle: "準備中", syncing: s.msg || "通信中", pending: `送信待ち ${s.pending}件`, offline: s.pending ? `電波なし・送信待ち ${s.pending}件` : "電波なし", error: "保存できていません", notoken: "鍵が未設定" };
+      pill.textContent = m[s.state] || s.state; pill.dataset.state = s.state; pill.title = s.msg || "";
     });
   };
 
@@ -36,7 +33,7 @@
     box.innerHTML = `<h2>鍵の設定</h2>
       <p class="small">記録用の保管場所（shelf-data）を読み書きするための鍵を、この端末に入れます。鍵はこの端末の中にだけ保存されます。</p>
       <input type="password" id="keyIn" autocomplete="off" placeholder="github_pat_ で始まる文字列" aria-label="鍵">
-      <div class="row"><button type="button" id="keySave">保存して始める</button><span class="small muted" id="keyMsg"></span></div>`;
+      <div class="row"><button type="button" class="pri" id="keySave">保存して始める</button><span class="small muted" id="keyMsg"></span></div>`;
     box.querySelector("#keySave").onclick = async () => {
       const v = box.querySelector("#keyIn").value.trim(); if (!v) return;
       Shelf.setToken(v);

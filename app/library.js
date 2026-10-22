@@ -14,6 +14,7 @@ function showTab() {
 addEventListener("hashchange", showTab);
 function render(t = location.hash.slice(1) || "register") {
   $("qCount").textContent = Object.keys(Lib.queue()).length || "";
+  const sum = Lib.ownSummary(); $("libBig").innerHTML = `${sum.books}<small> 冊</small>`; $("libSub").textContent = `を所有・うち積読 ${sum.tsun}件`; $("eyebrow").textContent = `LIBRARY · ${sum.records} RECORDS`;
   if (t === "list") renderList();
   else if (t === "queue") renderQueue();
   else if (t === "stats") renderStats();
