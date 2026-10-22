@@ -9,8 +9,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app/ui.css?v=202610221743">
-<link rel="stylesheet" href="app/bar.css?v=202610221743">
+<link rel="stylesheet" href="app/ui.css?v=202610222316">
+<link rel="stylesheet" href="app/bar.css?v=202610222316">
 <style>
 .tabs{display:flex;border:1px solid var(--line);border-radius:6px;overflow-x:auto;scrollbar-width:none;background:var(--card);width:max-content;max-width:100%;min-width:0;position:sticky;top:calc(44px + env(safe-area-inset-top,0px) + 8px);z-index:5}
 .tabs a{flex:0 0 auto;white-space:nowrap;text-decoration:none;color:var(--muted);padding:7px 12px;font-size:13px;border-right:1px solid var(--line)}
@@ -158,7 +158,7 @@
   <!-- ブクログ -->
   <section class="panel card" id="p-booklog" aria-label="ブクログから" hidden>
     <p class="small muted">必読書チェッカーに取り込んであるブクログの記録から、持っている本にチェックを付けて蔵書に登録します。登録すると、<b>いちばん下でチェックした本までの、チェックしなかった本</b>は「確認済み（持っていない）」として、次からは出ません。続きから確かめられます。</p>
-    <div class="row"><input type="search" id="blq" class="grow" placeholder="書名・著者で絞る" aria-label="ブクログの記録を絞る"><label class="row small" style="gap:6px"><input type="checkbox" id="blShowSeen"> 確認済みも表示</label><button type="button" class="small quiet" id="blResetSeen" hidden>確認済みをすべて未確認に戻す</button></div>
+    <div class="row"><input type="search" id="blq" class="grow" placeholder="書名・著者で絞る" aria-label="ブクログの記録を絞る"><select id="blSort" aria-label="並び順"><option value="">ブクログの記録の順</option><option value="new">登録が新しい順</option><option value="old">登録が古い順</option></select><label class="row small" style="gap:6px"><input type="checkbox" id="blShowSeen"> 確認済みも表示</label><button type="button" class="small quiet" id="blResetSeen" hidden>確認済みをすべて未確認に戻す</button></div>
     <p class="small muted" id="blCount"></p>
     <ul class="list" id="blList"></ul>
     <div class="row" style="justify-content:center"><button type="button" class="quiet" id="blMore" hidden>さらに表示</button></div>
@@ -177,11 +177,11 @@
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-<script src="app/store.js?v=202610221743"></script>
-<script src="app/biblio.js?v=202610221743"></script>
-<script src="app/scan.js?v=202610221743"></script>
-<script src="app/ui.js?v=202610221743"></script>
-<script src="app/lib.js?v=202610221743"></script>
-<script src="app/library.js?v=202610221743"></script>
+<script src="app/store.js?v=202610222316"></script>
+<script src="app/biblio.js?v=202610222316"></script>
+<script src="app/scan.js?v=202610222316"></script>
+<script src="app/ui.js?v=202610222316"></script>
+<script src="app/lib.js?v=202610222316"></script>
+<script src="app/library.js?v=202610222316"></script>
 </body>
 </html>

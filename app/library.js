@@ -561,6 +561,9 @@ function renderBooklog() {
   const nSeen = all.filter(x => seen[blKey(x)]).length;
   blRows = all.filter(x => showSeen || !seen[blKey(x)]);
   if (q) blRows = blRows.filter(x => Biblio.norm(x.t + " " + x.a).includes(q));
+  // 並び順：ブクログに登録した日で。同じ日のものは記録の順のまま
+  const so = $("blSort").value;
+  if (so) { const ix = new Map(all.map((x, i) => [x.id, i])); const dir = so === "new" ? -1 : 1; blRows.sort((a, b) => ((a.d || "") < (b.d || "") ? -dir : (a.d || "") > (b.d || "") ? dir : ix.get(a.id) - ix.get(b.id))); }
   for (const id of [...blSel]) if (!all.some(x => x.id === id)) blSel.delete(id);
   $("blCount").textContent = `未確認 ${all.length - nSeen}件・確認済み（持っていない） ${nSeen}件${q ? `・絞り込み ${blRows.length}件` : ""}`;
   $("blList").innerHTML = blRows.slice(0, blShown).map(blRow).join("") || `<li class="empty">${all.length ? "未確認の記録はありません。「確認済みも表示」で見直せます" : "登録できる記録はありません"}</li>`;
@@ -577,6 +580,8 @@ function blBarSync() {
 }
 $("blq").addEventListener("input", () => { blShown = 100; renderBooklog(); });
 $("blShowSeen").addEventListener("change", () => { blShown = 100; renderBooklog(); });
+$("blSort").addEventListener("change", () => { blShown = 100; try { localStorage.setItem("shelf.blSort", $("blSort").value); } catch (_) {} renderBooklog(); window.scrollTo(0, $("p-booklog").getBoundingClientRect().top + window.scrollY - 60); });
+try { $("blSort").value = localStorage.getItem("shelf.blSort") || ""; } catch (_) {}
 // 「さらに表示」は描き直さずに続きを足す（チェックとスクロール位置はそのまま）
 $("blMore").onclick = () => {
   const from = blShown; blShown += 200;
