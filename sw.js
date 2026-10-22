@@ -1,6 +1,6 @@
 // 電波がないときも画面を開けるよう、アプリのファイルを端末に置いておく
 // 記録そのものは store.js が端末の保存領域に持つ
-const V = "shelf-v5";
+const V = "shelf-202610221743";
 const APP = ["./", "index.html", "library.html", "novels.html", "films.html", "manifest.webmanifest",
   "app/ui.css", "app/bar.css", "app/ui.js", "app/store.js", "app/biblio.js", "app/scan.js", "app/lib.js", "app/library.js",
   "app/legacy-novels.js", "app/legacy-films.js", "app/icon.svg"];
@@ -11,8 +11,10 @@ self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
   if (u.hostname === "api.github.com" || u.hostname.endsWith("openbd.jp") || u.hostname.endsWith("ndl.go.jp")) return; // 記録と書誌は常に通信で
   // 自分のファイルと外部の部品：通信を先に試し、だめなら置いておいた写しを使う
-  e.respondWith(fetch(e.request).then(r => {
+  // 自分のファイルは毎回サーバーに新しいか確かめる（ブラウザの一時保存の古い版を使わない）
+  const go = u.origin === location.origin ? fetch(e.request.url, { cache: "no-cache" }) : fetch(e.request);
+  e.respondWith(go.then(r => {
     if (r.ok && (u.origin === location.origin || /unpkg\.com|jsdelivr\.net|fonts\.(googleapis|gstatic)\.com/.test(u.hostname))) { const c = r.clone(); caches.open(V).then(x => x.put(e.request, c)); }
     return r;
-  }).catch(() => caches.match(e.request).then(r => r || caches.match("index.html"))));
+  }).catch(() => caches.match(e.request).then(r => r || caches.match(e.request, { ignoreSearch: true })).then(r => r || caches.match("index.html"))));
 });

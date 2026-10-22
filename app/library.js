@@ -374,7 +374,11 @@ const QACTS = [
   { v: "off", type: "unowned", label: "外したままにする" },
   { v: "drop", type: "*", label: "対象が見つからないものを片付ける" },
 ];
+// qSel：チェックした確認待ち。描き直し・種類の切り替え・ほかの本の決定をしても残す（片付いたものだけ外す）
+// qDraft：まだ決定していない入力（本の種類の選択、書名・著者の入力）。これも描き直しで消さない
 let qType = "", qSel = new Set();
+const qDraft = {};
+const qShownIds = () => [...document.querySelectorAll("[data-qsel]")].map(x => x.dataset.qsel);
 function renderQueue() {
   const all = Object.entries(Lib.queue()).sort((a, b) => (a[1].at < b[1].at ? -1 : 1));
   const by = {}; for (const [, x] of all) by[x.type] = (by[x.type] || 0) + 1;
@@ -382,7 +386,9 @@ function renderQueue() {
   $("qType").innerHTML = `<option value="">すべての種類（${all.length}件）</option>` + Object.entries(by).map(([k, n]) => `<option value="${k}"${k === qType ? " selected" : ""}>${esc(QNAME[k] || k)}（${n}件）</option>`).join("");
   $("qBar").hidden = all.length < 2;
   const q = qType ? all.filter(([, x]) => x.type === qType) : all;
-  for (const id of [...qSel]) if (!q.some(([k]) => k === id)) qSel.delete(id);
+  const live = Lib.queue();
+  for (const id of [...qSel]) if (!live[id]) qSel.delete(id);
+  for (const id of Object.keys(qDraft)) if (!live[id]) delete qDraft[id];
   const works = Shelf.read(Lib.P.novels); const wk = works ? new Map(works.books.map(b => [b.k, b])) : new Map();
   $("qList").innerHTML = q.map(([id, x]) => {
     const it = Lib.get(x.target);
@@ -390,8 +396,8 @@ function renderQueue() {
     if (!it) return `<div class="qitem${qSel.has(id) ? " sel" : ""}"><div class="row">${box}<p>対象の記録が見つかりません</p></div><div class="row"><button type="button" class="small quiet" data-qdone="${id}">片付ける</button></div></div>`;
     let act = "";
     if (x.type === "link") act = `<div class="cands">${(x.cands || []).map(k => wk.get(k)).filter(Boolean).map(w => `<button type="button" data-qlink="${id}" data-wk="${w.k}">これに結び付ける：${esc(w.t)}（${esc(w.a)}・${w.y}）</button>`).join("")}<button type="button" class="quiet" data-qlink="${id}" data-wk="">結び付けない</button></div>`;
-    else if (x.type === "cat") act = `<div class="row"><select data-qcatsel="${id}">${CATS.map(c => `<option${c === it.cat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select><button type="button" class="small" data-qcat="${id}">この種類にする</button></div>`;
-    else if (x.type === "bib") act = `<div class="grid2"><label class="f">書名<input type="text" data-qbt="${id}" value="${esc(it.t.startsWith("（") ? "" : it.t)}"></label><label class="f">著者<input type="text" data-qba="${id}" value="${esc(it.a || "")}"></label></div><div class="row"><button type="button" class="small" data-qbib="${id}">保存する</button></div>`;
+    else if (x.type === "cat") act = `<div class="row"><select data-qcatsel="${id}">${CATS.map(c => `<option${c === (qDraft[id]?.cat ?? it.cat) ? " selected" : ""}>${esc(c)}</option>`).join("")}</select><button type="button" class="small" data-qcat="${id}">この種類にする</button></div>`;
+    else if (x.type === "bib") act = `<div class="grid2"><label class="f">書名<input type="text" data-qbt="${id}" value="${esc(qDraft[id]?.t ?? (it.t.startsWith("（") ? "" : it.t))}"></label><label class="f">著者<input type="text" data-qba="${id}" value="${esc(qDraft[id]?.a ?? (it.a || ""))}"></label></div><div class="row"><button type="button" class="small" data-qbib="${id}">保存する</button></div>`;
     else if (x.type === "check") act = `<div class="row"><button type="button" class="small" data-qdone="${id}">このままでよい</button><button type="button" class="small quiet" data-qopen="${it.id}">書誌を直す</button></div>`;
     else if (x.type === "unowned") act = `<div class="row"><button type="button" class="small" data-qst="${id}" data-st="own">所有に戻す</button><button type="button" class="small quiet" data-qst="${id}" data-st="gone">手放した</button><button type="button" class="small quiet" data-qst="${id}" data-st="off">外したままにする</button></div>`;
     return `<div class="qitem${qSel.has(id) ? " sel" : ""}"><div class="row">${box}<span class="pill warn">${esc(QNAME[x.type] || x.type)}</span><span class="small muted">${esc(x.why || "")}</span></div>
@@ -402,28 +408,36 @@ function renderQueue() {
 // 選んだものの種類に合う操作だけを出す
 function qBarSync() {
   const qs = Lib.queue();
-  const types = new Set([...qSel].map(id => Lib.get(qs[id]?.target) ? qs[id]?.type : "*").filter(Boolean));
+  const shownIds = new Set(qShownIds()), vis = [...qSel].filter(id => shownIds.has(id)), hidden = qSel.size - vis.length;
+  const types = new Set(vis.map(id => Lib.get(qs[id]?.target) ? qs[id]?.type : "*").filter(Boolean));
   const shown = [...document.querySelectorAll("[data-qsel]")];
   $("qAll").checked = shown.length > 0 && shown.every(x => x.checked);
   $("qAll").indeterminate = !$("qAll").checked && shown.some(x => x.checked);
-  $("qSelN").textContent = `${qSel.size}件を選択`;
+  $("qSelN").textContent = `${vis.length}件を選択` + (hidden ? `（ほかの種類でチェックした${hidden}件は、その種類を表示すると対象になります）` : "");
   const acts = QACTS.filter(a => types.has(a.type));
   const cur = $("qAct").value;
   $("qAct").innerHTML = acts.length ? acts.map(a => `<option value="${a.v}"${a.v === cur ? " selected" : ""}>${esc(a.label)}</option>`).join("") : `<option value="">選ぶと、使える操作が出ます</option>`;
   $("qAct").disabled = !acts.length;
   $("qActCat").hidden = $("qAct").value !== "cat";
   if (!$("qActCat").options.length) $("qActCat").innerHTML = CATS.map(c => `<option>${esc(c)}</option>`).join("");
-  const n = [...qSel].filter(id => { const x = qs[id]; const a = QACTS.find(y => y.v === $("qAct").value); return x && a && (a.type === (Lib.get(x.target) ? x.type : "*")); }).length;
+  const n = vis.filter(id => { const x = qs[id]; const a = QACTS.find(y => y.v === $("qAct").value); return x && a && (a.type === (Lib.get(x.target) ? x.type : "*")); }).length;
   $("qRun").disabled = !n;
   $("qRun").textContent = n ? `選んだもののうち${n}件に適用` : "選んだものに適用";
 }
-$("qType").onchange = () => { qType = $("qType").value; qSel.clear(); renderQueue(); };
+$("qType").onchange = () => { qType = $("qType").value; renderQueue(); };
 $("qAct").onchange = qBarSync;
 $("qAll").onchange = () => {
   for (const el of document.querySelectorAll("[data-qsel]")) { el.checked = $("qAll").checked; el.closest(".qitem").classList.toggle("sel", el.checked); if (el.checked) qSel.add(el.dataset.qsel); else qSel.delete(el.dataset.qsel); }
   qBarSync();
 };
+// 決定前の入力を覚える
+$("qList").addEventListener("input", e => {
+  const t = e.target, id = t.dataset.qcatsel || t.dataset.qbt || t.dataset.qba; if (!id) return;
+  const d = qDraft[id] = qDraft[id] || {};
+  if (t.dataset.qcatsel) d.cat = t.value; else if (t.dataset.qbt) d.t = t.value; else d.a = t.value;
+});
 $("qList").addEventListener("change", e => {
+  if (e.target.dataset.qcatsel) { (qDraft[e.target.dataset.qcatsel] = qDraft[e.target.dataset.qcatsel] || {}).cat = e.target.value; return; }
   const c = e.target.closest("[data-qsel]"); if (!c) return;
   if (c.checked) qSel.add(c.dataset.qsel); else qSel.delete(c.dataset.qsel);
   c.closest(".qitem").classList.toggle("sel", c.checked); qBarSync();
@@ -431,19 +445,19 @@ $("qList").addEventListener("change", e => {
 $("qRun").onclick = () => {
   const act = QACTS.find(a => a.v === $("qAct").value); if (!act) return;
   const qs = Lib.queue(); let n = 0;
-  for (const id of [...qSel]) {
+  const shownIds = new Set(qShownIds());
+  for (const id of [...qSel].filter(x => shownIds.has(x))) {
     const x = qs[id]; if (!x) continue;
     const it = Lib.get(x.target);
-    if (act.type === "*") { if (!it) { Lib.qDel(id); n++; } continue; }
+    if (act.type === "*") { if (!it) { Lib.qDel(id); qSel.delete(id); n++; } continue; }
     if (!it || x.type !== act.type) continue;
     if (act.v === "link1") { const k = (x.cands || [])[0]; if (!k) continue; Lib.link(it, k); }
     else if (act.v === "linkNone") Lib.link(it, null);
     else if (act.v === "cat") { const c = JSON.parse(JSON.stringify(it)); c.cat = $("qActCat").value; c.catAuto = false; Lib.put(c); }
     else if (act.v === "own" || act.v === "gone") Lib.setStatus(it, act.v);
     // ok・off：記録はそのままで確認待ちだけを片付ける
-    Lib.qDel(id); qSel.delete(id); n++;
+    Lib.qDel(id); qSel.delete(id); delete qDraft[id]; n++;
   }
-  qSel.clear();
   UI.toast(`${n}件を「${act.label.replace("…", "：" + $("qActCat").value)}」にしました`);
   setTimeout(() => render("queue"), 50);
 };
@@ -557,7 +571,8 @@ function renderBooklog() {
 function blBarSync() {
   const n = blSel.size;
   $("blSelN").textContent = n ? `${n}冊にチェック` : "チェックした本はありません";
-  $("blReg").disabled = !n; $("blReg").textContent = n ? `選んだ${n}冊を登録` : "選んだ本を登録";
+  // 押せない状態にはしない（チェックを数えそこねても登録できるように）。押したときに画面のチェックを数え直す
+  $("blReg").style.opacity = n ? "" : ".55"; $("blReg").textContent = n ? `選んだ${n}冊を登録` : "選んだ本を登録";
   $("blClear").hidden = !n;
 }
 $("blq").addEventListener("input", () => { blShown = 100; renderBooklog(); });
@@ -585,13 +600,17 @@ $("blResetSeen").onclick = () => {
   setBlSeen(m => { for (const k of Object.keys(m)) delete m[k]; }); UI.toast("確認済みをすべて未確認に戻しました"); setTimeout(renderBooklog, 50);
 };
 $("blClear").onclick = () => { blSel.clear(); for (const c of document.querySelectorAll("[data-bl]:checked")) { c.checked = false; c.closest("li").classList.remove("sel"); } blBarSync(); };
+let blBusy = false;
 $("blReg").onclick = async () => {
-  if (!blSel.size) return;
+  if (blBusy) return;
+  for (const c of document.querySelectorAll("[data-bl]")) { if (c.checked) blSel.add(c.dataset.bl); else blSel.delete(c.dataset.bl); }
+  if (!blSel.size) { UI.toast("登録する本にチェックを付けてください"); return; }
+  blBusy = true;
   const all = new Map(booklogItems().map(x => [x.id, x]));
   // いちばん下でチェックした本までの、チェックしなかった本を確認済みにする（今の表示の並びで）
   let last = -1; blRows.forEach((x, i) => { if (blSel.has(x.id)) last = i; });
   const skip = blRows.slice(0, last + 1).filter(x => !blSel.has(x.id));
-  $("blReg").disabled = true; $("blReg").textContent = "登録しています…";
+  $("blReg").textContent = "登録しています…";
   let n = 0;
   for (const id of [...blSel]) {
     const x = all.get(id); if (!x) continue;
@@ -603,6 +622,7 @@ $("blReg").onclick = async () => {
   if (skip.length) setBlSeen(m => { for (const x of skip) m[blKey(x)] = 1; });
   blSel.clear();
   UI.toast(`${n}冊を登録しました${skip.length ? `。チェックしなかった${skip.length}冊は確認済みにしました` : ""}`, 4000);
+  blBusy = false;
   setTimeout(renderBooklog, 50);
 };
 
