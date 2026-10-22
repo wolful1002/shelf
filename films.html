@@ -286,7 +286,7 @@ details.sources summary{cursor:pointer;font-weight:700}
         <select id="pCty" aria-label="製作国"></select>
         <select id="pVod" aria-label="配信"><option value="">配信：問わない</option><option value="sub">見放題あり</option><option value="any">配信あり（レンタル・購入を含む）</option></select>
         <select id="pLen" aria-label="上映時間"><option value="">上映時間：問わない</option><option value="90">90分以内</option><option value="120">2時間以内</option><option value="150">2時間半以内</option><option value="151">2時間半を超える大作</option></select>
-        <label><input type="checkbox" id="pWant"> 観たい印のみ</label>
+        <select id="pWant" aria-label="観たい印で絞る"><option value="">すべての未見</option><option value="want">観たい印のみ</option></select>
       </div></div>
     <div class="pickcard" id="pickCard"></div>
   </section>
@@ -322,8 +322,8 @@ details.sources summary{cursor:pointer;font-weight:700}
     <div class="seg" role="group" aria-label="鑑賞状況">
       <button id="fAll" aria-pressed="true">すべて</button>
       <button id="fTodo" aria-pressed="false">未見</button>
-      <button id="fDone" aria-pressed="false">鑑賞済</button>
       <button id="fWant" aria-pressed="false">観たい</button>
+      <button id="fDone" aria-pressed="false">鑑賞済</button>
     </div>
     <span class="count" id="count"></span>
   </div>
@@ -379,9 +379,9 @@ details.sources summary{cursor:pointer;font-weight:700}
   </details>
 
   <details class="sources" id="bkSec">
-    <summary>オフラインで使う・記録のバックアップ</summary>
+    <summary>記録のバックアップ</summary>
     <div class="addlists">
-      <div id="offlineBox">
+      <div id="offlineBox" hidden>
         <p class="h3">オフライン版</p>
         <p class="method" style="margin:6px 0">このページを1つのHTMLファイルとして保存し、パソコンのブラウザ（Chrome・Edge・Firefox・Safari）で開けば、ネット接続なしで使えます。オフライン版の記録はそのブラウザの中に保存されます。オンライン版と記録をそろえたいときは、下のバックアップで書き出して、もう一方で読み込んでください。</p>
         <button class="btn pri" id="dlOffline">オフライン版をダウンロード</button> <span class="mm" id="dlOfflineMsg"></span>

@@ -162,7 +162,7 @@
     if (inp.mag) { const hit = L.byMag(inp.mag, inp.magMonth); if (hit) return { status: "dup", item: hit }; }
     const bib = inp.bib || null;
     const ccode = inp.ccode || bib?.ccode || "";
-    let cat = Biblio.catFromC(ccode) || Biblio.catFromNdc(bib?.ndc) || (/コミック/.test(bib?.label || "") ? "漫画" : null);
+    let cat = Biblio.catFromC(ccode) || Biblio.catFromNdc(bib?.ndc) || (/コミック/.test(bib?.label || "") ? "漫画" : null) || inp.catHint || null;
     if (inp.mag) cat = inp.isbn ? "ムック" : "雑誌";
     const fmt = inp.media === "ebook" ? "電子" : (Biblio.formatFromC(ccode) || (inp.mag ? "雑誌" : ""));
     const t = bib?.t || inp.t || "";

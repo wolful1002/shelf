@@ -1,4 +1,4 @@
-// 今のチェッカー（Movie List Checker）の画面のプログラム。tools/build-legacy.py で取り出したもの。手直しは build-legacy.py の PATCHES にあるものだけ。
+// 映画チェッカー（Movie List Checker）の画面のプログラム。もとは tools/build-legacy.py で前のページから取り出したもの。2026-10-23 の「チェッカーの揃え方」からは、このファイルを直接直している（build-legacy.py で作り直さないこと）。
 
 const DATA = window.__DATA__;;
 const ORDER = ["b1001","ss_c","ss_d","tspdt","afi","bbc_us","bbc_fl","bbc_21","nyt_21","cahiers","imdb","kj_fo09","kj_pro","kj_jp09","kj_jp100","bfi_jp","to_jp","cholic"];
@@ -226,7 +226,8 @@ async function flushDoc(D){
   D.writing = true; D.dirty = false;
   const ts = {}; for(const n of D.names) ts[n] = TS[n];
   const body = {...D.body(), ts, v:2, updated:new Date().toISOString()};
-  try{ await D.ref.set(body); D.remote = body }
+  // 送った内容の写しを覚える（そのままだと今の記録と同じものを指し、次の変更が「送信済み」に見えて送られなかった）
+  try{ await D.ref.set(body); D.remote = JSON.parse(JSON.stringify(body)) }
   catch(e){
     if(e && (e.code === "invalid_argument" || e.code === "not_granted" || e.code === "revoked")){ for(const X of Object.values(DOCS)) X.ref = null; setSync("アカウントには保存できない共有設定のため、記録はこのブラウザに保存されます") }
     else { setSync("保存に失敗しました。この端末には残っています。しばらくして自動で再送します"); D.dirty = true; clearTimeout(D.timer); D.timer = setTimeout(()=>flushDoc(D), 15000) }
@@ -271,6 +272,8 @@ async function initStore(){
     stamp(Object.keys(COLS)); saveLocal(); legacyLocal = false;
     for(const D of Object.values(DOCS)) if(!sameRemote(D)) push(D);
     afterRemote(changedDocs);
+    // 鑑賞済みの作品に残っている観たい印を外す（必読書と同じ扱いにそろえたため。1回だけ）
+    { let n = 0; for(const k of Object.keys(want)) if(seen[k]){ delete want[k]; n++ } if(n){ commit(); renderAll() } }
     setSync("<b>●</b> アカウントに保存・端末間で同期");
     for(const [name, D] of Object.entries(DOCS)){
       D.ref.onSnapshot(s=>{
@@ -314,7 +317,7 @@ function toggle(k){
     offerUndo(`『${f ? f.t : "作品"}』の鑑賞済みを外しました${dateOf(prev) ? `（鑑賞日 ${prev}）` : ""}`, ()=>{
       seen[k] = prev; if(prevRw) rw[k] = prevRw; commit(); refreshRow(k); renderSummary(); renderPick();
     });
-  } else seen[k] = NODATE;   // チェックだけでは鑑賞日を付けない（詳細で日付を入れられる）
+  } else { seen[k] = NODATE; delete want[k] }   // チェックだけでは鑑賞日を付けない（詳細で日付を入れられる）。観たい印は外す（必読書と同じ）
   commit();
 }
 // 2026-10-19 までチェックすると当日の日付が入っていた。その日のチェック分は日付なしに直す（端末ごとに1回）
@@ -341,12 +344,13 @@ function addView(k, d){
 function watchedToday(k){
   const d = today(), f = byKey.get(k), prevS = seen[k], prevR = rw[k] ? [...rw[k]] : undefined;
   if(seen[k] && viewsOf(k).includes(d)) return;
-  const again = !!dateOf(seen[k]);
-  addView(k, d); commit();
+  const again = !!dateOf(seen[k]), prevW = want[k];
+  addView(k, d); delete want[k]; commit();
   refreshRow(k); renderSummary(); renderPick(); renderStats();
   offerUndo(`『${f ? f.t : "作品"}』を${again ? "今日もう一度観た" : "今日観た"}と記録しました`, ()=>{
     if(prevS === undefined) delete seen[k]; else seen[k] = prevS;
     if(prevR === undefined) delete rw[k]; else rw[k] = prevR;
+    if(prevW && !seen[k]) want[k] = prevW;
     commit(); refreshRow(k); renderSummary(); renderPick(); renderStats();
   });
 }
@@ -431,10 +435,7 @@ function buildControls(){
     const b = e.target.closest(".chk"); if(!b) return;
     const li = b.closest(".row"); const k = li.dataset.k;
     toggle(k);
-    const on = !!seen[k];
-    li.classList.toggle("done", on); b.setAttribute("aria-checked", on);
-    li.querySelector(".when").textContent = on ? whenTxt(k) : "";
-    if(openKey === k){ li.outerHTML = rowHTML(byKey.get(k)) }
+    refreshRow(k); document.querySelector(`.row[data-k="${k}"] .chk`)?.focus({preventScroll:true});
     renderSummary(); renderPick();
   });
 }
@@ -602,7 +603,7 @@ function rowHTML(f){
     <span class="no">${f.id}</span>
     <div class="ttl"><a href="${url}" target="_blank" rel="noopener">${esc(f.t)}</a>
       <div class="sub"><button class="lk yr${state.sort==="year"||state.sort==="decade"?" on":""}" data-sort="year" data-v="${f.y||0}" title="公開年順に並べる（もう一度押すと年代順）">${f.y || "年不明"}</button>${f.rt ? `<span class="yr">${f.rt}分</span>` : ""}${f.d ? `<button class="lk${state.sort==="director"?" on":""}" data-sort="director" data-v="${esc(dirKey(f))}" title="監督順に並べる">${esc(f.d)}</button>` : dir}${f.c ? `<button class="lk${state.sort==="country"?" on":""}" data-sort="country" data-v="${esc(ctryKey(f))}" title="製作国順に並べる">${esc(cname(f.c))}</button>` : `<span>${esc(cname(f.c))}</span>`}${f.j ? `<span class="jp ${f.j}" title="${JP[f.j]}">${JPS[f.j]}</span>` : ""}${tags}<span class="when">${on ? whenTxt(f.k) : ""}</span></div>
-      <div class="sub">${f.en?`<span>${esc(f.en)}</span>`:""}<button class="todayb" title="${on && dateOf(seen[f.k]) ? "今日の日付で再鑑賞を記録" : "今日の日付で鑑賞済みにする"}">${on && dateOf(seen[f.k]) ? "今日また観た" : "今日観た"}</button><button class="wantb" aria-pressed="${!!want[f.k]}" title="観たい印（「観たい」で絞り込めます）">${want[f.k] ? "★ 観たい" : "☆ 観たい"}</button><button class="open" aria-expanded="${isOpen}">${isOpen ? "閉じる" : "詳細・配信・同じ監督"}</button></div></div>
+      <div class="sub">${f.en?`<span>${esc(f.en)}</span>`:""}<button class="todayb" title="${on && dateOf(seen[f.k]) ? "今日の日付で再鑑賞を記録" : "今日の日付で鑑賞済みにする"}">${on && dateOf(seen[f.k]) ? "今日また観た" : "今日観た"}</button>${on ? "" : `<button class="wantb" aria-pressed="${!!want[f.k]}" title="観たい印（「観たい」で絞り込めます）">${want[f.k] ? "★ 観たい" : "☆ 観たい"}</button>`}<button class="open" aria-expanded="${isOpen}">${isOpen ? "閉じる" : "詳細・配信・同じ監督"}</button></div></div>
     <div class="score${tierOf(f.sc)==="s"?" hi":""}" title="全映画リスト${f.gh}/${f.ge}・専門リスト${f.sh}/${f.se}：${esc(lists)}"><b>${Math.round(f.sc)}</b>${f.n}/${f.e}リスト</div>
     <div class="strip" aria-label="${esc(lists)}">${strip}</div>${detail}
   </li>`;
@@ -726,7 +727,8 @@ function renderList(until){
   // a plain refresh keeps the film at the top of the screen where it was
   if(until === undefined && window.scrollY > 200){
     const top = stickyH();
-    for(const li of $("reel").querySelectorAll(".row")){ const r = li.getBoundingClientRect(); if(r.bottom > top){ anchor = {k: li.dataset.k, top: r.top}; break } }
+    // 見ていた作品＝帯の下で半分以上見えている最初の作品（必読書と同じ）
+    for(const li of $("reel").querySelectorAll(".row")){ const r = li.getBoundingClientRect(); if((r.top + r.bottom) / 2 > top){ anchor = {k: li.dataset.k, top: r.top}; break } }
     if(anchor) until = anchor.k;
   }
   if(until === true) need = rows.length;
@@ -780,7 +782,7 @@ setTimeout(endBoot, 2500);
 // ---------- today's pick ----------
 let pickKey = null, pickDay = null, pickN = 0;
 function pickPool(){
-  const t = $("pTier").value, dec = $("pDec").value, cty = $("pCty").value, vod = $("pVod").value, onlyWant = $("pWant").checked, len = +$("pLen").value;
+  const t = $("pTier").value, dec = $("pDec").value, cty = $("pCty").value, vod = $("pVod").value, onlyWant = $("pWant").value === "want", len = +$("pLen").value;
   return films.filter(f=>{
     if(seen[f.k]) return false;
     const tr = tierOf(f.sc);
@@ -805,7 +807,7 @@ function choosePick(fresh){
     pickKey = f.k; pickN++;
   } else if(!pickKey || !pool.some(f=>f.k===pickKey)){
     // the first pick of the day stays the same until the day changes or conditions change
-    const sig = today() + "|" + $("pTier").value + $("pDec").value + $("pCty").value + $("pVod").value + $("pLen").value + $("pWant").checked;
+    const sig = today() + "|" + $("pTier").value + $("pDec").value + $("pCty").value + $("pVod").value + $("pLen").value + $("pWant").value;
     pickKey = pool[hashStr(sig) % pool.length].k;
   }
   return pool;
@@ -834,7 +836,7 @@ function renderPick(){
       <button class="btn pri" id="pAgain">別の1本</button>
       <button class="btn" id="pWantB">${want[f.k] ? "観たい印を外す" : "☆ 観たいに追加"}</button>
       <button class="btn" id="pSeen">鑑賞済みにする</button>
-      <button class="btn" id="pOpen">リストで詳細を見る</button>
+      <button class="btn" id="pOpen">一覧で詳細を見る</button>
     </div>`;
 }
 function initPick(){
@@ -1128,7 +1130,8 @@ $("wCheck").addEventListener("click", runWatchCheck);
 
 // ---------- offline copy & backup ----------
 const IS_FILE = location.protocol === "file:";
-if(IS_FILE) $("offlineBox").hidden = true;
+// このアプリ自体が電波なしで動くので、オフライン版のダウンロードは出さない（offline.html はこのアプリにはない）
+$("offlineBox").hidden = true;
 async function offerFile(filename, data, msgEl){
   let dl = null;
   if(!IS_FILE){ try{ dl = await claude.use("downloads") }catch(_){} }

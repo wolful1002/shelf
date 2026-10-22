@@ -1,25 +1,25 @@
-/* Layout: チェッカー（必読書）の画面と同じ見た目にそろえる — 共通の上の帯、見出し（小見出し・明朝の大見出し・説明）、幅1060pxの1段組、角6pxの紙のカード */
+/* Layout: チェッカー（必読書・映画）の画面と同じ見た目にそろえる — 共通の上の帯、見出し（小見出し・明朝の大見出し・説明）、幅1040pxの1段組、角6pxの紙のカード */
 :root{
-  --bg:#eceff2; --card:#fbfcfd; --fg:#1b2233; --muted:#5d6676; --line:#d3d8df; --soft:#e3e7ec;
-  --accent:#8e3b36; --accent-soft:#f3dfdc; --ok:#2b6656; --ok-soft:#dbebe5; --warn:#8a5a12; --warn-soft:#f5ead6; --ng:#a33a2c; --ng-soft:#f6e3df;
-  --f-display:"Zen Old Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
-  --f-body:"BIZ UDPGothic","Hiragino Sans","Yu Gothic",system-ui,sans-serif;
+  --bg:#eef0ee; --card:#fbfcfa; --fg:#1d2421; --muted:#5f6b66; --line:#d5dbd7; --soft:#e3e7e4;
+  --accent:#c2410c; --accent-soft:#fbe3d6; --ok:#2f6b4f; --ok-soft:#dcebe2; --warn:#8a5a12; --warn-soft:#f5ead6; --ng:#a33a2c; --ng-soft:#f6e3df;
+  --f-display:"Shippori Mincho B1","Hiragino Mincho ProN","Yu Mincho",serif;
+  --f-body:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",system-ui,sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#12161d; --card:#1a1f28; --fg:#e6e9ef; --muted:#98a1b0; --line:#2c3340; --soft:#232a35;
-  --accent:#e08a80; --accent-soft:#3a2321; --ok:#79c4ab; --ok-soft:#1b322b; --warn:#e3b64d; --warn-soft:#3a2f1c; --ng:#ef9488; --ng-soft:#3b2421; color-scheme:dark}}
+  --bg:#141917; --card:#1b211e; --fg:#e7ece9; --muted:#9aa7a1; --line:#2e3833; --soft:#28302c;
+  --accent:#f08a4b; --accent-soft:#3a2418; --ok:#7cc6a0; --ok-soft:#1c3328; --warn:#e3b64d; --warn-soft:#3a2f1c; --ng:#ef9488; --ng-soft:#3b2421; color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#12161d; --card:#1a1f28; --fg:#e6e9ef; --muted:#98a1b0; --line:#2c3340; --soft:#232a35;
-  --accent:#e08a80; --accent-soft:#3a2321; --ok:#79c4ab; --ok-soft:#1b322b; --warn:#e3b64d; --warn-soft:#3a2f1c; --ng:#ef9488; --ng-soft:#3b2421; color-scheme:dark}
+  --bg:#141917; --card:#1b211e; --fg:#e7ece9; --muted:#9aa7a1; --line:#2e3833; --soft:#28302c;
+  --accent:#f08a4b; --accent-soft:#3a2418; --ok:#7cc6a0; --ok-soft:#1c3328; --warn:#e3b64d; --warn-soft:#3a2f1c; --ng:#ef9488; --ng-soft:#3b2421; color-scheme:dark}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 var(--f-body);
   padding:28px max(16px,env(safe-area-inset-right,0px)) 64px max(16px,env(safe-area-inset-left,0px))}
 a{color:var(--fg)}
-.wrap{max-width:1060px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr);gap:20px;min-width:0}
+.wrap{max-width:1040px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr);gap:20px;min-width:0}
 h1{font-size:21px;margin:4px 0 0}
 h2{font-size:16px;margin:0}
 h3{font-size:14px;margin:0}
@@ -32,7 +32,7 @@ p{margin:0}
 .phead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px;align-items:end;margin-bottom:4px}
 @media (max-width:720px){.phead{grid-template-columns:minmax(0,1fr)}}
 .phead .eyebrow{font-family:var(--f-mono);font-size:12px;letter-spacing:.12em;color:var(--muted)}
-.phead h1{font-family:var(--f-display);font-weight:900;font-size:clamp(32px,6vw,54px);line-height:1.15;margin:6px 0 10px;text-wrap:balance}
+.phead h1{font-family:var(--f-display);font-weight:800;font-size:clamp(32px,6vw,54px);line-height:1.15;margin:6px 0 10px;text-wrap:balance}
 .phead .lede{color:var(--muted);max-width:64ch}
 .phead .meter{font-family:var(--f-mono);text-align:right;min-width:160px}
 @media (max-width:720px){.phead .meter{text-align:left}}

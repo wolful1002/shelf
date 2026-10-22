@@ -1,4 +1,4 @@
-// 今のチェッカー（生涯読書リスト（自分用））の画面のプログラム。tools/build-legacy.py で取り出したもの。手直しは build-legacy.py の PATCHES にあるものだけ。
+// 必読書チェッカー（Novel List Checker）の画面のプログラム。もとは tools/build-legacy.py で前のページから取り出したもの。2026-10-23 の「チェッカーの揃え方」からは、このファイルを直接直している（build-legacy.py で作り直さないこと）。
 
 const DATA = window.__DATA__;;
 const L = DATA.lists, ORDER = Object.keys(L), books = DATA.books;
@@ -23,7 +23,7 @@ const yr = y => y < 0 ? `前${-y}年頃` : y < 1500 ? `${y}年頃` : String(y);
 const amzURL = b => "https://www.amazon.co.jp/s?i=stripbooks&k=" + encodeURIComponent(`${b.t.replace(/（.*?）/g, "")} ${b.a}`);
 const trLabel = b => b.tr===2 ? `<span class="tag jp">日本語原作</span>` : b.tr===1 ? `<span class="tag">邦訳あり</span>` : `<span class="tag no-tr">邦訳なし</span>`;
 
-let read = {}, want = {}, own = {};
+let read = {}, want = {}, own = {}, rr = {};   // rr[k]：2回目以降に読んだ日の一覧（最初に読んだ日は read[k]）
 let st = {tier:null,list:"",cty:"",era:"",tr:"",kd:"",gn:"",q:"",status:"all",sort:"score"};
 let openKey = null;
 
@@ -34,15 +34,15 @@ const isDate = v => typeof v==="string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 const MIG = "undate-20261021";
 // marks made on 2026-10-21 and dates from 2011 (bulk registration) become "read, no date"
 function migrateRead(r, done){ let ch = false; for(const [k,v] of Object.entries(r)) if(isDate(v) && (v.startsWith("2011") || (!done && v==="2026-10-21"))){ r[k] = 1; ch = true } return ch }
-function lsRead(){ try{ const o = JSON.parse(localStorage.getItem(LS)||"{}")||{}; const r = o.read||{}; migrateRead(r, o.mig===MIG); return {read:r, want:o.want||{}, own:o.own||{}} }catch(e){ return {read:{},want:{},own:{}} } }
-function lsWrite(){ try{ localStorage.setItem(LS, JSON.stringify({read,want,own,mig:MIG})) }catch(e){} }
+function lsRead(){ try{ const o = JSON.parse(localStorage.getItem(LS)||"{}")||{}; const r = o.read||{}; migrateRead(r, o.mig===MIG); return {read:r, want:o.want||{}, own:o.own||{}, rr:o.rr||{}} }catch(e){ return {read:{},want:{},own:{},rr:{}} } }
+function lsWrite(){ try{ localStorage.setItem(LS, JSON.stringify({read,want,own,rr,mig:MIG})) }catch(e){} }
 let docRef = null, writing = false, dirty = false, timer = null;
 const setSync = h => { $("sync").innerHTML = h };
 // snapshots from the store are frozen: always work on a deep copy
 const plain = o => JSON.parse(JSON.stringify(o || {}));
 const snapData = s => plain(s && s.exists ? s.data() : {});
 async function initStore(){
-  ({read, want, own} = lsRead()); lsWrite(); renderAll();
+  ({read, want, own, rr} = lsRead()); lsWrite(); renderAll();
   setSync("この端末に保存");
   let db = null, user = null;
   try{ [db,user] = await Promise.all([window.claude?.use?.("db"), window.claude?.use?.("user")]) }catch(e){}
@@ -54,18 +54,20 @@ async function initStore(){
   try{
     docRef = col.doc("books");
     const d = snapData(await docRef.get());
-    const r0 = d.read||{}, w0 = d.want||{}, o0 = d.own||{};
+    const r0 = d.read||{}, w0 = d.want||{}, o0 = d.own||{}, rr0 = d.rr||{};
     const migrated = migrateRead(r0, d.mig===MIG);
-    const merged = {read:{...r0,...read}, want:{...w0,...want}, own:{...o0,...own}};
-    const changed = Object.keys(merged.read).length !== Object.keys(r0).length || Object.keys(merged.want).length !== Object.keys(w0).length || Object.keys(merged.own).length !== Object.keys(o0).length;
-    read = merged.read; want = merged.want; own = merged.own; lsWrite(); renderAll();
+    // 保存先に記録があれば、それを正とする（端末の古い写しを足すと、別の端末や蔵書で外した印が戻ってしまう）
+    const hasRemote = !!(d.read || d.want || d.own);
+    const merged = hasRemote ? {read:r0, want:w0, own:o0, rr:rr0} : {read:{...r0,...read}, want:{...w0,...want}, own:{...o0,...own}, rr:{...rr0,...rr}};
+    const changed = !hasRemote && (Object.keys(merged.read).length || Object.keys(merged.want).length || Object.keys(merged.own).length);
+    read = merged.read; want = merged.want; own = merged.own; rr = merged.rr; lsWrite(); renderAll();
     setSync("<b>●</b> アカウントに保存・端末間で同期");
     if(changed || migrated || d.mig!==MIG) schedule();
     docRef.onSnapshot(s=>{
       if(writing || dirty || s.metadata?.hasPendingWrites) return;
       const x = snapData(s); migrateRead(x.read||{}, x.mig===MIG);
-      if(JSON.stringify([x.read||{}, x.want||{}, x.own||{}]) === JSON.stringify([read, want, own])) return;
-      read = x.read||{}; want = x.want||{}; own = x.own||{}; lsWrite(); renderAll(); renderLogSum();
+      if(JSON.stringify([x.read||{}, x.want||{}, x.own||{}, x.rr||{}]) === JSON.stringify([read, want, own, rr])) return;
+      read = x.read||{}; want = x.want||{}; own = x.own||{}; rr = x.rr||{}; lsWrite(); renderAll(); renderLogSum();
     }, ()=>{});
   }catch(e){ setSync("この端末に保存（同期は一時的に使えません）"); return }
   try{
@@ -136,7 +138,7 @@ async function flush(){
   if(!docRef){ dirty = false; return }
   if(writing){ schedule(); return }
   writing = true; dirty = false;
-  try{ await docRef.set({read, want, own, mig:MIG, updated:new Date().toISOString()}) }
+  try{ await docRef.set({read, want, own, rr, mig:MIG, updated:new Date().toISOString()}) }
   catch(e){ setSync("保存できませんでした。この端末には残っています") }
   writing = false; if(dirty) schedule();
 }
@@ -152,7 +154,50 @@ async function cFlush(){
 }
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}` };
 function setRead(k, v){ read[k] = v; delete want[k]; lsWrite(); schedule(); afterRead(k) }
-function unread(k){ delete read[k]; lsWrite(); schedule(); afterRead(k) }
+function unread(k){ delete read[k]; delete rr[k]; lsWrite(); schedule(); afterRead(k) }
+// ---------- 読了の記録（映画チェッカーと同じ動き） ----------
+// チェックだけでは読了日を付けない（詳細で日付を入れられる）。外すとすぐ外れ、「元に戻す」を出す
+const dOf = v => isDate(v) ? v : "";
+const rrOf = k => (rr[k] || []).filter(isDate);
+const readsOf = k => [...new Set([dOf(read[k]), ...rrOf(k)].filter(Boolean))].sort();
+const readTxt = k => { const v = readsOf(k), n = (read[k] ? 1 : 0) + rrOf(k).filter(d=>d !== dOf(read[k])).length;
+  return (v.length ? `✓ ${v[v.length-1]}` : "✓ 読了") + (n > 1 ? `（${n}回）` : "") };
+function toggleRead(k){
+  if(read[k]){
+    const prev = read[k], prevRR = rr[k], b = byKey.get(k);
+    delete read[k]; delete rr[k]; lsWrite(); schedule(); afterRead(k);
+    offerUndo(`『${b ? b.t : "作品"}』の読了を外しました${dOf(prev) ? `（読了日 ${prev}）` : ""}`, ()=>{
+      read[k] = prev; if(prevRR) rr[k] = prevRR; delete want[k]; lsWrite(); schedule(); afterRead(k);
+    });
+  } else { read[k] = 1; delete want[k]; lsWrite(); schedule(); afterRead(k) }
+}
+// もう一度読んだ日を足す（最初に読んだ日は早いほうを read[k] に残す）
+function addRead(k, d){
+  if(!read[k] || !dOf(read[k])){ read[k] = d; delete want[k]; return }
+  if(readsOf(k).includes(d)) return;
+  if(d < read[k]){ rr[k] = [...rrOf(k), read[k]].sort(); read[k] = d }
+  else rr[k] = [...rrOf(k), d].sort();
+}
+function readToday(k){
+  const d = today(), b = byKey.get(k), prevR = read[k], prevRR = rr[k] ? [...rr[k]] : undefined;
+  if(read[k] && readsOf(k).includes(d)) return;
+  const again = !!dOf(read[k]);
+  addRead(k, d); lsWrite(); schedule(); afterRead(k);
+  offerUndo(`『${b ? b.t : "作品"}』を${again ? "今日もう一度読んだ" : "今日読んだ"}と記録しました`, ()=>{
+    if(prevR === undefined) delete read[k]; else read[k] = prevR;
+    if(prevRR === undefined) delete rr[k]; else rr[k] = prevRR;
+    lsWrite(); schedule(); afterRead(k);
+  });
+}
+let undoBox = null, undoTimer = null;
+function offerUndo(msg, restore){
+  if(!undoBox){ undoBox = document.createElement("div"); undoBox.className = "toast"; undoBox.setAttribute("role","status"); document.body.appendChild(undoBox) }
+  undoBox.innerHTML = `<span>${esc(msg)}</span><button type="button">元に戻す</button>`;
+  undoBox.hidden = false;
+  undoBox.querySelector("button").onclick = ()=>{ restore(); hideUndo() };
+  clearTimeout(undoTimer); undoTimer = setTimeout(hideUndo, 8000);
+}
+function hideUndo(){ if(undoBox) undoBox.hidden = true; clearTimeout(undoTimer) }
 function afterRead(k){
   closeRdPop(); refreshRow(k); renderSummary();
   if(st.status!=="all") renderList();
@@ -206,20 +251,31 @@ function buildControls(){
   $("pCty").innerHTML = `<option value="">国：すべて</option>` + ctyOpts;
   $("era").innerHTML = `<option value="">時代：すべて</option>` + ERAS.map(e=>`<option value="${e[0]}">${e[1]}</option>`).join("");
   $("pTier").innerHTML = `<option value="">優先度：すべて</option>` + TIERS.map(t=>`<option value="${t.id}">${t.nm}</option>`).join("");
-  $("q").addEventListener("input", e=>{ st.q = e.target.value.trim().toLowerCase(); renderList(true) });
+  let qTimer = null;
+  $("q").addEventListener("input", e=>{ clearTimeout(qTimer); qTimer = setTimeout(()=>{ st.q = e.target.value.trim().toLowerCase(); keepPlace() }, 250) });
   for(const [id,key] of [["list","list"],["cty","cty"],["era","era"],["tr","tr"],["kd","kd"],["gn","gn"],["sort","sort"]])
     $(id).addEventListener("change", e=>{
-      if(key!=="sort"){ st[key] = e.target.value; renderList(true); return }
+      if(key!=="sort"){ st[key] = e.target.value; keepPlace(); return }
       const a = anchorRow(); sortBefore(); st.sort = e.target.value; sortAfter(); renderList(true);
       if(a){ ensureRow(a.k); settleRow(a.k, a.top) }
     });
   const segs = [["fAll","all"],["fTodo","todo"],["fWant","want"],["fDone","done"],["fOwn","own"],["fTsun","tsundoku"]];
   for(const [id,v] of segs) $(id).addEventListener("click", ()=>{
-    st.status = v; segs.forEach(([b])=>$(b).setAttribute("aria-pressed", b===id)); renderList(true) });
+    st.status = v; segs.forEach(([b])=>$(b).setAttribute("aria-pressed", b===id)); keepPlace() });
   $("tiers").addEventListener("click", e=>{
     const b = e.target.closest(".tier"); if(!b) return;
-    st.tier = st.tier===b.dataset.t ? null : b.dataset.t; renderSummary(); renderList(true) });
-  $("list-ol").addEventListener("click", e=>{ if(e.target.id==="moreBtn") return showMore(); onListClick(e) });
+    st.tier = st.tier===b.dataset.t ? null : b.dataset.t; renderSummary(); keepPlace() });
+  $("list-ol").addEventListener("click", onListClick);
+  // 詳細の読了日・再読の日付
+  $("list-ol").addEventListener("change", e=>{
+    const inp = e.target.closest(".readDate, .addRead"); if(!inp) return;
+    const k = inp.closest(".row").dataset.k; if(!read[k]) return;
+    const ok = isDate(inp.value) && inp.value <= today();
+    if(inp.classList.contains("readDate")) read[k] = ok ? inp.value : 1;
+    else if(ok) addRead(k, inp.value);
+    else return;
+    lsWrite(); schedule(); refreshRow(k); renderSummary();
+  });
   $("backBtn").addEventListener("click", popView);
   $("rdPop").addEventListener("click", onRdPop);
   document.addEventListener("mousedown", e=>{ if(!$("rdPop").hidden && !e.target.closest("#rdPop") && !e.target.closest(".chk,[data-rd],[data-a=read]")) closeRdPop() });
@@ -228,24 +284,39 @@ function buildControls(){
   for(const id of ["pTier","pCty","pGn","pTr","pWant"]) $(id).addEventListener("change", ()=>{ pickKey = null; renderPick() });
   $("pickCard").addEventListener("click", onPickClick);
   $("statsBox").addEventListener("toggle", ()=>{ if($("statsBox").open) renderStats() });
-  $("bkOut").addEventListener("click", ()=>{ $("bkText").value = exportText(); $("bkMsg").textContent = `読了${Object.keys(read).length}冊・読みたい${Object.keys(want).length}冊・所有${Object.keys(own).length}冊・追加リスト${custom.lists.length}本を書き出しました。` });
-  $("bkCopy").addEventListener("click", ()=>{
-    const t = $("bkText"); if(!t.value) t.value = exportText();
-    navigator.clipboard?.writeText(t.value).then(()=>{ $("bkMsg").textContent = "コピーしました。" }, ()=>{ t.select(); $("bkMsg").textContent = "選択しました。手動でコピーしてください。" });
+  // ---------- 記録のバックアップ（ファイル。映画チェッカーと同じ形） ----------
+  $("bkExport").addEventListener("click", ()=>{
+    const data = JSON.stringify({app:"lifetime-books", version:4, exported:new Date().toISOString(), read, rr, want, own, custom, log:blog}, null, 1);
+    offerFile(`Novel_List_Checker_バックアップ_${today()}.json`, data, $("bkMsg"));
   });
-  $("bkIn").addEventListener("click", ()=>{
-    try{
-      const o = JSON.parse($("bkText").value);
-      let nl = 0;
-      if(o.log && Array.isArray(o.log.items)){ blog = lMerge(blog, lNorm(o.log)); lItemsDirty = true; lWrite(); lSchedule() }
-      if(o.custom){ const c0 = custom.lists.length; custom = cMerge(custom, cNorm(o.custom)); nl = custom.lists.length - c0; cWrite(); cSchedule(); refreshAll() }
-      const r = Object.fromEntries(Object.entries(o.read||{}).filter(([k])=>byKey.has(k)));
-      const w = Object.fromEntries(Object.entries(o.want||{}).filter(([k])=>byKey.has(k)));
-      const ow = Object.fromEntries(Object.entries(o.own||{}).filter(([k])=>byKey.has(k)));
-      read = {...read, ...r}; want = {...want, ...w}; own = {...own, ...ow}; Object.keys(read).forEach(k=>delete want[k]);
-      lsWrite(); schedule(); renderAll();
-      $("bkMsg").textContent = `読了${Object.keys(r).length}冊・読みたい${Object.keys(w).length}冊・所有${Object.keys(ow).length}冊${o.custom?`・追加リスト（新規${nl}本）`:""}を読み込みました（今の記録に追加）。`;
-    }catch(e){ $("bkMsg").textContent = "読み込めませんでした。書き出した文字列をそのまま貼り付けてください。" }
+  $("bkFile").addEventListener("change", async e=>{
+    const file = e.target.files[0]; e.target.value = ""; if(!file) return;
+    let o; try{ o = JSON.parse(await file.text()) }catch(_){ $("bkMsg").textContent = "読み込めませんでした。書き出したバックアップファイル（.json）を選んでください。"; return }
+    if(!o || o.app !== "lifetime-books"){ $("bkMsg").textContent = "このページのバックアップファイルではありません。"; return }
+    let nl = 0, nr = 0;
+    if(o.log && Array.isArray(o.log.items)){ blog = lMerge(blog, lNorm(o.log)); lItemsDirty = true; lWrite(); lSchedule() }
+    if(o.custom){ const c0 = custom.lists.length; custom = cMerge(custom, cNorm(o.custom)); nl = custom.lists.length - c0; cWrite(); cSchedule(); refreshAll() }
+    const earlierR = (a, b) => !!dOf(a) && (!dOf(b) || a < b);
+    for(const [k,v] of Object.entries(o.read||{})){ if(!byKey.has(k)) continue; if(!read[k]){ read[k] = v || 1; nr++ } else if(earlierR(v, read[k])){ const old = read[k]; read[k] = v; if(dOf(old)) addRead(k, old) } }
+    for(const [k,ds] of Object.entries(o.rr||{})) if(read[k]) for(const d of ds) if(isDate(d)) addRead(k, d);
+    for(const [k,v] of Object.entries(o.want||{})) if(byKey.has(k) && !read[k] && !want[k]) want[k] = v;
+    for(const [k,v] of Object.entries(o.own||{})) if(byKey.has(k) && !own[k]) own[k] = v;
+    lsWrite(); schedule(); renderAll();
+    $("bkMsg").textContent = `読み込みました（新たに読了 ${nr}冊${o.custom ? `・追加リスト 新規${nl}本` : ""}）。`;
+  });
+  // ---------- 一覧をテキストで書き出す（映画チェッカーと同じ形） ----------
+  const renderExport = () => { if($("txSec").open){ $("txOut").value = exportList(); $("txMsg").textContent = "" } };
+  for(const id of ["txWhat","txFmt","txView","txNo","txMark","txDate"]) $(id).addEventListener("change", renderExport);
+  $("txSec").addEventListener("toggle", renderExport);
+  $("txCopy").addEventListener("click", async ()=>{
+    const text = exportList(); $("txOut").value = text;
+    try{ await navigator.clipboard.writeText(text); $("txMsg").textContent = "コピーしました。"; return }catch(_){}
+    try{ const t = $("txOut"); t.focus(); t.select(); if(document.execCommand("copy")){ $("txMsg").textContent = "コピーしました。"; return } }catch(_){}
+    $("txMsg").textContent = "自動でコピーできませんでした。上の欄を全選択してコピーしてください。";
+  });
+  $("txSave").addEventListener("click", ()=>{
+    const nm = $("txWhat").value === "all" ? "全リスト" : "読了した作品";
+    offerFile(`Novel_List_Checker_${nm}_${today()}.txt`, exportList(), $("txMsg"));
   });
 }
 
@@ -323,7 +394,7 @@ function rowHTML(b){
       <span class="no">${b.id}</span>
       <div class="ttl"><a class="tl" href="https://www.google.com/search?q=${encodeURIComponent(`${b.t} ${b.a}`)}" target="_blank" rel="noopener">${esc(b.t)}</a>
         <div class="meta"><button class="lk" data-sort="author" title="著者順に並べる">${esc(b.a)}</button><button class="lk yr" data-sort="year" title="発表年順に並べる（もう一度で年代順）">${yr(b.y)}</button><button class="lk" data-sort="country" title="国順に並べる">${CN[b.c]||b.c}</button>${b.g.map(g=>`<span class="tag gn">${GN[g]}</span>`).join("")}${b.tr===2 ? trLabel(b) + (b.jp ? `<button class="lk pubj" data-sort="publisher" title="出版社順に並べる（初刊の版元 / 現在の主な文庫・版）">${esc(b.jp)}${b.jb?` / ${esc(b.jb)}`:""}</button>` : "") : b.jp ? "" : trLabel(b)}${b.tr===1 && b.jp ? `<span class="tjw">邦訳 <button class="lk tj" data-sort="publisher" title="出版社順に並べる">${esc(b.jp)}</button>${b.jy?`<button class="lk tj" data-sort="tyear" title="邦訳の刊行年順に並べる">・${b.jy}</button>`:""}</span>` : ""}</div>
-        <div class="acts"><button class="detb" aria-expanded="${openKey===b.k}">${openKey===b.k?"詳細を閉じる":"詳細"}</button>${r?`<button class="when" data-rd title="読んだ日を変える">✓ ${readLabel(read[b.k])}</button>`:`<button class="wantb" aria-pressed="${w}">${w?"★ 読みたい":"☆ 読みたい"}</button>`}<a class="amz" href="${amzURL(b)}" target="_blank" rel="noopener" title="Amazonで探す">Amazon</a></div></div>
+        <div class="acts"><button class="detb" aria-expanded="${openKey===b.k}">${openKey===b.k?"詳細を閉じる":"詳細"}</button>${r?`<span class="when">${readTxt(b.k)}</span>`:`<button class="wantb" aria-pressed="${w}">${w?"★ 読みたい":"☆ 読みたい"}</button>`}<button class="todayb" title="${r && dOf(read[b.k]) ? "今日の日付で再読を記録" : "今日の日付で読了にする"}">${r && dOf(read[b.k]) ? "今日また読んだ" : "今日読んだ"}</button><a class="amz" href="${amzURL(b)}" target="_blank" rel="noopener" title="Amazonで探す">Amazon</a></div></div>
       <div class="rc"><div class="score${b.sc>=50?" hi":""}"><b>${Math.round(b.sc)}</b>${b.n}/${b.e}リスト</div>
         <button class="ownb" aria-pressed="${!!own[b.k]}" aria-label="${esc(b.t)} を所有している" title="手元にある本に印を付ける"><span class="ob" aria-hidden="true">${own[b.k]?"■":"□"}</span>所有</button></div>
       <div class="strip" aria-hidden="true">${strip(b)}</div>
@@ -341,7 +412,12 @@ function detailHTML(b){
   const sameHTML = same.length ? `<div><h3>同じ作家のリスト内作品（未読 ${same.filter(x=>!read[x.k]).length}／${same.length}）</h3><ul class="same">${same.map(x=>`<li><span class="r">${yr(x.y)}</span><span><button data-go="${x.k}">${esc(x.t)}</button>　<span style="color:var(--muted);font-size:12px">${tierNm(tierOf(x.sc))}・${Math.round(x.sc)}${read[x.k]?"・読了":""}</span></span></li>`).join("")}</ul></div>` : "";
   const qj = encodeURIComponent(`${b.t} ${b.a}`);
   const ed = b.ed ? `<p style="margin:0;font-size:12.5px;color:var(--muted)">1001冊の掲載版：${b.ed}${b.ed.includes("–")?"":"年版のみ"}</p>` : "";
+  const r = !!read[b.k];
+  const rdHTML = r ? `<div class="rdl"><span class="lb">読了日</span><span><input type="date" class="readDate dt" value="${dOf(read[b.k])}" max="${today()}" aria-label="最初に読んだ日"> <span class="mm">${dOf(read[b.k]) ? "最初に読んだ日" : "空欄なら日付なし"}</span></span>
+      ${rrOf(b.k).length ? `<span class="lb">再読</span><span class="views">${rrOf(b.k).map(d=>`<span>${d}<button type="button" class="rmread" data-d="${d}" aria-label="${d}の再読を消す">×</button></span>`).join("")}</span>` : ""}
+      <span class="lb">もう一度読んだ</span><span><input type="date" class="addRead dt" max="${today()}" aria-label="もう一度読んだ日を足す"> <span class="mm">日付を選ぶと再読として足します</span></span></div>` : "";
   return `<div class="det">
+    ${rdHTML}
     <div style="font-size:13px;color:var(--muted)">原題 <span style="color:var(--ink)">${esc(b.o)}</span>${b.ty==="S"?"　・短編集":""}</div>
     ${b.tr===2 && b.jp ? `<div style="font-size:13px;color:var(--muted)">主な刊行 <span style="color:var(--ink)">初刊 ${esc(b.jp)}${b.jy?`（${b.jy}年）`:""}${b.jb?`　現在の主な版 ${esc(b.jb)}`:""}</span>${b.jv ? `<span class="tagm">Webで確認済み${b.jvd ? "（" + b.jvd + "）" : ""}</span>` : ""}${b.js ? `　<a href="${esc(b.js)}" target="_blank" rel="noopener">出典</a>` : ""}　<a href="https://ndlsearch.ndl.go.jp/search?cs=bib&keyword=${encodeURIComponent(b.t+" "+b.a)}" target="_blank" rel="noopener">国立国会図書館で版を確かめる</a></div>` : ""}
     ${b.tr===1 ? `<div style="font-size:13px;color:var(--muted)">主な邦訳 <span style="color:var(--ink)">${b.jp ? esc(b.jp) + (b.jy ? `（${b.jy}年）` : "") : "未確認"}</span>${b.jv ? `<span class="tagm">Webで確認済み${b.jvd ? "（" + b.jvd + "）" : ""}</span>` : ""}${b.js ? `　<a href="${esc(b.js)}" target="_blank" rel="noopener">出典</a>` : ""}${b.jn ? `<div style="font-size:12px;margin-top:2px">${esc(b.jn)}</div>` : ""}　<a href="https://ndlsearch.ndl.go.jp/search?cs=bib&keyword=${encodeURIComponent(b.t+" "+b.a)}" target="_blank" rel="noopener">国立国会図書館で版を確かめる</a></div>` : ""}
@@ -354,8 +430,10 @@ function detailHTML(b){
 function onListClick(e){
   const li = e.target.closest(".row"); if(!li) return;
   const k = li.dataset.k;
-  const ck = e.target.closest(".chk, [data-rd]");
-  if(ck){ openRdPop(k, ck); return }
+  if(e.target.closest(".chk")){ toggleRead(k); return }
+  if(e.target.closest(".todayb")){ readToday(k); return }
+  const rm = e.target.closest(".rmread");
+  if(rm){ rr[k] = rrOf(k).filter(d=>d !== rm.dataset.d); if(!rr[k].length) delete rr[k]; lsWrite(); schedule(); refreshRow(k); return }
   if(e.target.closest(".wantb")){ toggleWant(k); refreshRow(k); if(st.status==="want") renderList(); return }
   if(e.target.closest(".ownb")){ toggleOwn(k); refreshRow(k); if(st.status==="own"||st.status==="tsundoku") renderList(); renderPick(); return }
   const go = e.target.closest("[data-go]");
@@ -443,7 +521,7 @@ function sortAfter(){
 }
 function popView(){
   const v = viewStack.pop(); if(!v) return;
-  st = v.st; openKey = v.open; shown = v.shown || STEP; syncControls(); renderSummary(); renderList(); ensureRow(v.k); updateBack();
+  st = v.st; openKey = v.open; syncControls(); renderSummary(); renderList(v.k || true); ensureRow(v.k); updateBack();
   const place = () => {
     const li = document.querySelector(`.row[data-k="${v.k}"]`);
     if(li && v.off != null) window.scrollBy({top: li.getBoundingClientRect().top - v.off, behavior:"instant"});
@@ -459,7 +537,7 @@ function syncControls(){
 }
 // rows are rendered in batches as the reader scrolls, so long lists stay light
 const STEP = 200;
-let shown = STEP, lastRows = [], grpCnt = {}, moreObs = null;
+let shown = STEP, lastRows = [], grpCnt = {};
 function rowsHTML(from, to){
   const gf = GROUP[st.sort]; let html = "";
   let prev = from > 0 && gf ? gf(lastRows[from-1]) : null;
@@ -469,31 +547,44 @@ function rowsHTML(from, to){
   }
   return html;
 }
-const moreHTML = () => shown < lastRows.length ? `<li class="more"><button class="btn" id="moreBtn">さらに表示（残り${lastRows.length - shown}冊）</button></li>` : "";
-function renderList(reset){
-  if(reset) shown = STEP;
+// 一覧は最初の60冊をすぐ描き、残りは裏で少しずつ足して全件を出す（映画と同じ）。
+// 引数なし：見ていた作品の位置を保って描き直す。作品番号：その作品まで描く。true：先頭から描き直す
+const FIRST = 60, BATCH = 120;
+let listGen = 0;
+function renderList(until){
   const rows = filtered(); lastRows = rows;
   const gf = GROUP[st.sort]; grpCnt = {};
   if(gf) rows.forEach(b=>{ const g = gf(b); grpCnt[g] = (grpCnt[g]||0)+1 });
-  shown = Math.min(Math.max(shown, STEP), Math.max(rows.length, STEP));
-  $("list-ol").innerHTML = rows.length ? rowsHTML(0, shown) + moreHTML() : `<li class="empty">条件に合う作品はありません。</li>`;
+  const anchor = until === undefined ? anchorRow() : null;
+  const key = typeof until === "string" ? until : anchor ? anchor.k : null;
+  let need = FIRST;
+  if(key){ const i = rows.findIndex(b=>b.k===key); if(i >= 0) need = Math.max(FIRST, i + 40) }
+  shown = Math.min(rows.length, need);
+  $("list-ol").innerHTML = rows.length ? rowsHTML(0, shown) : `<li class="empty">条件に合う作品はありません。</li>`;
   $("count").textContent = `${rows.length}冊中 ${rows.filter(b=>read[b.k]).length}冊 読了`;
-  watchMore(); updateBack();
+  const gen = ++listGen;
+  const more = () => {
+    if(gen !== listGen || shown >= lastRows.length) return;
+    const from = shown; shown = Math.min(lastRows.length, shown + BATCH);
+    $("list-ol").insertAdjacentHTML("beforeend", rowsHTML(from, shown));
+    if(shown < lastRows.length) setTimeout(more, 16);
+  };
+  if(shown < rows.length) setTimeout(more, 30);
+  if(anchor && rows.some(b=>b.k===anchor.k)) settleRow(anchor.k, anchor.top);
+  updateBack();
 }
 function showMore(n){
   const from = shown; if(from >= lastRows.length) return;
-  shown = Math.min(lastRows.length, shown + (n || STEP));
-  document.querySelector("#list-ol > li.more")?.remove();
-  $("list-ol").insertAdjacentHTML("beforeend", rowsHTML(from, shown) + moreHTML());
-  watchMore();
+  shown = Math.min(lastRows.length, shown + (n || BATCH));
+  $("list-ol").insertAdjacentHTML("beforeend", rowsHTML(from, shown));
 }
-function watchMore(){
-  const li = document.querySelector("#list-ol > li.more"); if(!li) return;
-  if("IntersectionObserver" in window){
-    moreObs?.disconnect();
-    moreObs = new IntersectionObserver(es=>{ if(es.some(e=>e.isIntersecting)) showMore() }, {rootMargin:"800px"});
-    moreObs.observe(li);
-  }
+// 絞り込み・検索を変えたとき：見ていた作品が残っていればその位置に、消えていれば一覧の先頭に出す（映画と同じ）
+function keepPlace(){
+  const a = anchorRow();
+  renderList(true);
+  if(!a) return;
+  if(lastRows.some(b=>b.k===a.k)){ ensureRow(a.k); settleRow(a.k, a.top) }
+  else { const top = $("list-ol").getBoundingClientRect().top + window.scrollY - stickyH() - 8; if(window.scrollY > top) window.scrollTo(0, top) }
 }
 function ensureRow(k){
   if(document.querySelector(`.row[data-k="${k}"]`)) return;
@@ -554,7 +645,7 @@ function onPickClick(e){
   if(a==="again"){ const p = pool().filter(b=>b.k!==k); if(p.length) pickKey = p[Math.floor(Math.random()*p.length)].k; renderPick() }
   else if(a==="want"){ toggleWant(k); refreshRow(k); renderPick() }
   else if(a==="own"){ toggleOwn(k); refreshRow(k); renderPick() }
-  else if(a==="read"){ openRdPop(k, e.target.closest("[data-a]")) }
+  else if(a==="read"){ toggleRead(k) }
   else if(a==="open"){ pushView(k); jumpTo(k) }
 }
 
@@ -664,7 +755,38 @@ function refreshAll(){
   if(pickKey && !byKey.has(pickKey)) pickKey = null;
   renderAll(); renderMy(); renderLog();
 }
-function exportText(){ return JSON.stringify({app:"lifetime-books", v:3, read, want, own, custom, log:blog}) }
+function exportList(){
+  const what = $("txWhat").value, tsv = $("txFmt").value === "tsv";
+  const useView = $("txView").checked, withNo = $("txNo").checked;
+  const base = useView ? filtered() : books;
+  const line = (no, t, a, y, extra) => tsv
+    ? [...(no !== null ? [no] : []), t, a, y || "", ...(extra !== null ? [extra] : [])].join("\t")
+    : `${no !== null ? no + ". " : ""}${t}（${y ? yr(y) : "年不明"}）${a ? "／" + a : ""}${extra ? "　" + extra : ""}`;
+  const head = cols => tsv ? cols.join("\t") : null;
+  const out = [];
+  if(what === "all"){
+    const mark = $("txMark").checked;
+    out.push(`Novel List Checker　全リスト ${base.length}冊${useView ? "（絞り込み・並び順は画面のとおり）" : "（優先度順）"}　${today()} 書き出し`, "");
+    const h = head([...(withNo ? ["順位"] : []), "書名", "著者", "発表年", ...(mark ? ["読了"] : [])]); if(h) out.push(h);
+    for(const b of base) out.push(line(withNo ? b.id : null, b.t, b.a, b.y, mark ? (read[b.k] ? ("✓ " + readsOf(b.k).join("、")).trim() : "") : null));
+  } else {
+    const withDate = $("txDate").checked;
+    const rb = base.filter(b=>read[b.k]);
+    out.push(`Novel List Checker　読了した作品 ${rb.length}冊　${today()} 書き出し`, "");
+    const h = head([...(withNo ? ["順位"] : []), "書名", "著者", "発表年", ...(withDate ? ["読了日"] : [])]); if(h) out.push(h);
+    for(const b of rb) out.push(line(withNo ? b.id : null, b.t, b.a, b.y, withDate ? readsOf(b.k).join("、") : null));
+  }
+  return out.join("\n") + "\n";
+}
+async function offerFile(filename, data, msgEl){
+  let dl = null; try{ dl = await window.claude?.use?.("downloads") }catch(_){}
+  if(dl){
+    try{ await dl.save({filename, data}); msgEl.textContent = "保存しました。" }
+    catch(e){ msgEl.textContent = e && e.code === "declined" ? "保存を取りやめました。" : "このページからは保存できませんでした。" }
+    return;
+  }
+  msgEl.textContent = "このページからは保存できませんでした。";
+}
 
 // title matching
 const NZC = new Map();

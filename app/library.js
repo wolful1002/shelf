@@ -545,7 +545,7 @@ $("blReg").onclick = async () => {
   for (const id of ids) {
     const x = all.get(id); if (!x) continue;
     const ebook = /kindle|電子|ebook/i.test(x.type || "");
-    const r = await Lib.register({ t: x.t, a: x.a, src: "booklog", media: ebook ? "ebook" : "paper", bib: { t: x.t, a: x.a } });
+    const r = await Lib.register({ t: x.t, a: x.a, src: "booklog", media: ebook ? "ebook" : "paper", bib: { t: x.t, a: x.a }, catHint: blCat(x) });
     const it = JSON.parse(JSON.stringify(r.item)); it.blk = id;
     markBooklogRead(it, r.vol, x.d); n++;
   }
@@ -568,12 +568,33 @@ function markBooklogRead(it, vol, d) {
   it.blkRead = 1;
   Lib.put(it);
 }
-// 前の版でブクログから登録し、まだ読了になっていない本を一度だけ読了にする
+// ブクログの「カテゴリ」と「種別」から本の種類を決める（書誌にCコードがないため）。
+// 決めきれないカテゴリ（空欄・創作読本・死/不死/ゾンビ）は、これまでどおり確認待ちに回す
+const BL_CAT = { "ファンタジー": "小説", "ＳＦ": "小説", "SF": "小説", "ミステリ/ホラー/サスペンス": "小説", "未分類（フィクション）": "小説",
+  "詩": "詩歌", "未分類（ノンフィクション）": "ノンフィクション・教養", "動物/生物": "ノンフィクション・教養", "歴史/人類学": "ノンフィクション・教養",
+  "認知科学": "ノンフィクション・教養", "感染症": "ノンフィクション・教養" };
+function blCat(x) {
+  if (x.type === "マンガ") return "漫画";
+  if (x.type === "雑誌") return "雑誌";
+  return BL_CAT[(x.g || "").trim()] || null;
+}
+// 前の版でブクログから登録した本の手直しを一度だけ行う：未読のままなら読了に、種類が決まっていなければカテゴリから決める
 function fixBooklogRead() {
   const log = new Map(booklogItems().map(x => [x.id, x]));
   for (const it0 of Object.values(Lib.items())) {
-    if (!it0.blk || it0.blkRead) continue;
-    const x = log.get(it0.blk); const it = JSON.parse(JSON.stringify(it0));
+    if (!it0.blk) continue;
+    const x = log.get(it0.blk);
+    if (!it0.blkCat) {
+      const it = JSON.parse(JSON.stringify(it0)); it.blkCat = 1;
+      const c = x && blCat(x);
+      if (c && it.cat === "その他" && !it.catAuto) {
+        it.cat = c; it.catAuto = true;
+        for (const [qid, q] of Object.entries(Lib.queue())) if (q.target === it.id && q.type === "cat") Lib.qDel(qid);
+      }
+      Lib.put(it);
+    }
+    if (it0.blkRead) continue;
+    const it = JSON.parse(JSON.stringify(Lib.get(it0.id)));
     const vol = it.kind === "series" && x ? Biblio.splitVolume(x.t).vol : null;
     markBooklogRead(it, vol, x?.d);
   }
