@@ -520,36 +520,90 @@ $("printLabels").onclick = () => {
 };
 
 // ---------- ブクログから ----------
-let blShown = 100;
+// 一覧はブクログの記録の順。チェックは画面を描き直しても残す。
+// 登録したとき、いちばん下でチェックした本までのチェックしなかった本を「確認済み（持っていない）」にし、次から出さない。
+// 確認済みは設定（records/settings.json の blSeen）に、書名・著者で覚える（ブクログを取り込み直して並びが変わっても効く）
+let blShown = 100, blRows = [];
+const blSel = new Set();
+const blKey = x => Biblio.norm(x.t) + "|" + Biblio.norm(x.a);
+const blSeen = () => Lib.settings().blSeen || {};
+function setBlSeen(fn) { const s = JSON.parse(JSON.stringify(Lib.settings())); s.blSeen = s.blSeen || {}; fn(s.blSeen); Shelf.writeDoc(Lib.P.settings, s); }
 function booklogItems() {
   const meta = Shelf.read("records/novels-checker/log.json") || {};
   const out = [];
   for (let i = 0; i < (meta.chunks || 0); i++) (Shelf.read(`records/novels-checker/log-${i}.json`)?.items || []).forEach((x, j) => out.push({ id: `${i}-${j}`, t: x[0], a: x[1], d: x[2], g: x[4], type: x[5] }));
   return out;
 }
+const blRow = x => {
+  const seen = !!blSeen()[blKey(x)], on = blSel.has(x.id);
+  return `<li class="${seen ? "seen" : ""}${on ? " sel" : ""}" data-blrow="${x.id}"><label class="row" style="gap:10px;align-items:flex-start;flex:1;min-width:0"><input type="checkbox" data-bl="${x.id}"${on ? " checked" : ""}><span style="min-width:0"><span class="t">${esc(x.t)}</span><br><span class="m">${esc(x.a)}・${esc(x.d)}${x.type ? "・" + esc(x.type) : ""}${x.g ? "・" + esc(x.g) : ""}${seen ? "・確認済み" : ""}</span></span></label>${seen ? `<button type="button" class="small quiet" data-blunseen="${x.id}">未確認に戻す</button>` : "<span></span>"}</li>`;
+};
 function renderBooklog() {
   const done = new Set(Object.values(Lib.items()).map(it => it.blk).filter(Boolean));
+  const doneKey = new Set(Object.values(Lib.items()).map(it => it.blkKey).filter(Boolean));
+  const seen = blSeen(), showSeen = $("blShowSeen").checked;
   const q = Biblio.norm($("blq").value);
-  let rows = booklogItems().filter(x => !done.has(x.id));
-  if (q) rows = rows.filter(x => Biblio.norm(x.t + " " + x.a).includes(q));
-  $("blCount").textContent = `未登録 ${rows.length}件`;
-  $("blList").innerHTML = rows.slice(0, blShown).map(x => `<li><label class="row" style="gap:10px;align-items:flex-start"><input type="checkbox" data-bl="${x.id}"><span><span class="t">${esc(x.t)}</span><br><span class="m">${esc(x.a)}・${esc(x.d)}${x.type ? "・" + esc(x.type) : ""}</span></span></label><span></span></li>`).join("") || `<li class="empty">登録できる記録はありません</li>`;
-  $("blMore").hidden = rows.length <= blShown;
+  const all = booklogItems().filter(x => !done.has(x.id) && !doneKey.has(blKey(x)));
+  const nSeen = all.filter(x => seen[blKey(x)]).length;
+  blRows = all.filter(x => showSeen || !seen[blKey(x)]);
+  if (q) blRows = blRows.filter(x => Biblio.norm(x.t + " " + x.a).includes(q));
+  for (const id of [...blSel]) if (!all.some(x => x.id === id)) blSel.delete(id);
+  $("blCount").textContent = `未確認 ${all.length - nSeen}件・確認済み（持っていない） ${nSeen}件${q ? `・絞り込み ${blRows.length}件` : ""}`;
+  $("blList").innerHTML = blRows.slice(0, blShown).map(blRow).join("") || `<li class="empty">${all.length ? "未確認の記録はありません。「確認済みも表示」で見直せます" : "登録できる記録はありません"}</li>`;
+  $("blMore").hidden = blRows.length <= blShown;
+  $("blResetSeen").hidden = !(showSeen && nSeen);
+  blBarSync();
+}
+function blBarSync() {
+  const n = blSel.size;
+  $("blSelN").textContent = n ? `${n}冊にチェック` : "チェックした本はありません";
+  $("blReg").disabled = !n; $("blReg").textContent = n ? `選んだ${n}冊を登録` : "選んだ本を登録";
+  $("blClear").hidden = !n;
 }
 $("blq").addEventListener("input", () => { blShown = 100; renderBooklog(); });
-$("blMore").onclick = () => { blShown += 200; renderBooklog(); };
+$("blShowSeen").addEventListener("change", () => { blShown = 100; renderBooklog(); });
+// 「さらに表示」は描き直さずに続きを足す（チェックとスクロール位置はそのまま）
+$("blMore").onclick = () => {
+  const from = blShown; blShown += 200;
+  $("blList").insertAdjacentHTML("beforeend", blRows.slice(from, blShown).map(blRow).join(""));
+  $("blMore").hidden = blRows.length <= blShown;
+};
+$("blList").addEventListener("change", e => {
+  const c = e.target.closest("[data-bl]"); if (!c) return;
+  if (c.checked) blSel.add(c.dataset.bl); else blSel.delete(c.dataset.bl);
+  c.closest("li").classList.toggle("sel", c.checked); blBarSync();
+});
+$("blList").addEventListener("click", e => {
+  const b = e.target.closest("[data-blunseen]"); if (!b) return;
+  const x = blRows.find(y => y.id === b.dataset.blunseen); if (!x) return;
+  setBlSeen(m => { delete m[blKey(x)]; }); setTimeout(renderBooklog, 50);
+});
+$("blResetSeen").onclick = () => {
+  const b = $("blResetSeen");
+  if (b.dataset.arm !== "1") { b.dataset.arm = "1"; b.textContent = "もう一度押すと戻します"; setTimeout(() => { b.dataset.arm = ""; b.textContent = "確認済みをすべて未確認に戻す"; }, 3000); return; }
+  b.dataset.arm = ""; b.textContent = "確認済みをすべて未確認に戻す";
+  setBlSeen(m => { for (const k of Object.keys(m)) delete m[k]; }); UI.toast("確認済みをすべて未確認に戻しました"); setTimeout(renderBooklog, 50);
+};
+$("blClear").onclick = () => { blSel.clear(); for (const c of document.querySelectorAll("[data-bl]:checked")) { c.checked = false; c.closest("li").classList.remove("sel"); } blBarSync(); };
 $("blReg").onclick = async () => {
-  const ids = [...document.querySelectorAll("[data-bl]:checked")].map(x => x.dataset.bl); if (!ids.length) { UI.toast("登録する本を選んでください"); return; }
+  if (!blSel.size) return;
   const all = new Map(booklogItems().map(x => [x.id, x]));
+  // いちばん下でチェックした本までの、チェックしなかった本を確認済みにする（今の表示の並びで）
+  let last = -1; blRows.forEach((x, i) => { if (blSel.has(x.id)) last = i; });
+  const skip = blRows.slice(0, last + 1).filter(x => !blSel.has(x.id));
+  $("blReg").disabled = true; $("blReg").textContent = "登録しています…";
   let n = 0;
-  for (const id of ids) {
+  for (const id of [...blSel]) {
     const x = all.get(id); if (!x) continue;
     const ebook = /kindle|電子|ebook/i.test(x.type || "");
     const r = await Lib.register({ t: x.t, a: x.a, src: "booklog", media: ebook ? "ebook" : "paper", bib: { t: x.t, a: x.a }, catHint: blCat(x) });
-    const it = JSON.parse(JSON.stringify(r.item)); it.blk = id;
+    const it = JSON.parse(JSON.stringify(r.item)); it.blk = id; it.blkKey = blKey(x);
     markBooklogRead(it, r.vol, x.d); n++;
   }
-  UI.toast(`${n}件を登録しました`); setTimeout(renderBooklog, 50);
+  if (skip.length) setBlSeen(m => { for (const x of skip) m[blKey(x)] = 1; });
+  blSel.clear();
+  UI.toast(`${n}冊を登録しました${skip.length ? `。チェックしなかった${skip.length}冊は確認済みにしました` : ""}`, 4000);
+  setTimeout(renderBooklog, 50);
 };
 
 // ブクログの記録は読んだ本の記録なので、そこから登録した本は読了にする。
@@ -569,9 +623,9 @@ function markBooklogRead(it, vol, d) {
   Lib.put(it);
 }
 // ブクログの「カテゴリ」と「種別」から本の種類を決める（書誌にCコードがないため）。
-// 決めきれないカテゴリ（空欄・創作読本・死/不死/ゾンビ）は、これまでどおり確認待ちに回す
+// 決めきれないカテゴリ（空欄・死/不死/ゾンビ）は、これまでどおり確認待ちに回す
 const BL_CAT = { "ファンタジー": "小説", "ＳＦ": "小説", "SF": "小説", "ミステリ/ホラー/サスペンス": "小説", "未分類（フィクション）": "小説",
-  "詩": "詩歌", "未分類（ノンフィクション）": "ノンフィクション・教養", "動物/生物": "ノンフィクション・教養", "歴史/人類学": "ノンフィクション・教養",
+  "詩": "詩歌", "創作読本": "実用・趣味", "未分類（ノンフィクション）": "ノンフィクション・教養", "動物/生物": "ノンフィクション・教養", "歴史/人類学": "ノンフィクション・教養",
   "認知科学": "ノンフィクション・教養", "感染症": "ノンフィクション・教養" };
 function blCat(x) {
   if (x.type === "マンガ") return "漫画";
@@ -584,8 +638,9 @@ function fixBooklogRead() {
   for (const it0 of Object.values(Lib.items())) {
     if (!it0.blk) continue;
     const x = log.get(it0.blk);
-    if (!it0.blkCat) {
-      const it = JSON.parse(JSON.stringify(it0)); it.blkCat = 1;
+    if ((it0.blkCat || 0) < 2) {   // 2：創作読本を実用・趣味に入れた版
+      const it = JSON.parse(JSON.stringify(it0)); it.blkCat = 2;
+      if (x && !it.blkKey) it.blkKey = blKey(x);
       const c = x && blCat(x);
       if (c && it.cat === "その他" && !it.catAuto) {
         it.cat = c; it.catAuto = true;
