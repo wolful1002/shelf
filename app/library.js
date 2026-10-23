@@ -31,7 +31,7 @@ function render(t = location.hash.slice(1) || "register") {
   ready(); Shelf.on(Lib.P.novels, ready); Shelf.on(Lib.P.films, ready);
   Lib.reconcile();
   fixBooklogRead();
-  await runFixes();
+  if (typeof runFixes === "function") { try { await runFixes(); } catch (e) { console.error(e); } }
   Shelf.on(Lib.P.novelDoc, (d, remote) => { if (remote) { Lib.reconcile(); render(); } });
   let t = null;
   Shelf.onAny((p, remote) => { if (remote && /records\//.test(p)) { clearTimeout(t); t = setTimeout(() => render(), 300); } });

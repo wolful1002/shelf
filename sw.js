@@ -2,7 +2,7 @@
 // 記録そのものは store.js が端末の保存領域に持つ
 const V = "shelf-202610231407";
 const APP = ["./", "index.html", "library.html", "novels.html", "films.html", "manifest.webmanifest",
-  "app/ui.css", "app/bar.css", "app/ui.js", "app/store.js", "app/biblio.js", "app/scan.js", "app/lib.js", "app/library.js",
+  "app/ui.css", "app/bar.css", "app/ui.js", "app/store.js", "app/biblio.js", "app/scan.js", "app/lib.js", "app/fixes.js", "app/library.js",
   "app/legacy-novels.js", "app/legacy-films.js", "app/icon.svg"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(V).then(c => c.addAll(APP)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
