@@ -205,6 +205,9 @@
   const ptKey = memo(t => L.sameKey(plainTitle(t))), ptNorm = memo(t => Biblio.norm(plainTitle(t))), srKeyC = memo(n => L.srKey(n));
   // シリーズの仲間（同じシリーズ名・著者が重なる本）
   const sameAuthor = (a, b) => !a || !b || authorOverlap(a, b) || Biblio.norm(a) === Biblio.norm(b);
+  const latinOnly = x => /[a-z]/i.test(x) && !/[぀-ヿ一-鿿]/.test(x);
+  // 著者が同じとみなせるか（片方がローマ字・片方がかなのように書き方が違うときは比べられないので、同じとみなす）
+  L.authorMatch = (a, b) => sameAuthor(a, b) || latinOnly(a) !== latinOnly(b);
   L.seriesMembers = (key, a, excludeId) => Object.values(L.items()).filter(it => it.sr && L.srKey(it.sr) === key && it.id !== excludeId && sameAuthor(a, it.a));
   const commonHead = ts => { if (!ts.length) return ""; let p = ts[0]; for (const t of ts) { let i = 0; while (i < p.length && p[i] === t[i]) i++; p = p.slice(0, i); } return p; };
   // シリーズを探すための索引（記録の一覧ごとに1度だけ作る）。cand：候補のシリーズ名→本・sr：付いているシリーズ名→本・to：「〇〇と」の始まり→本
