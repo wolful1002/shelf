@@ -102,6 +102,28 @@ const FIXES = [
       log.push(`ブクログの記録を所有している本に結び付け、読了にしました：${n}冊・シリーズの${vols}巻`);
     },
   },
+  // 2026-10-24：確認待ちで「同じ本（まとめる）」を選んでも、ブクログとの結び付きが消えていたため、
+  // ブクログの画面で同じ本が未登録に戻り、もう一度登録されて同じ確認をやり直させていた。
+  // 本人がすでに「同じ本」と答えた組み合わせをまとめ直し、消えていた結び付きを戻す
+  {
+    id: "2026-10-24-same-again",
+    async run(log) {
+      const PAIRS = [["b-mvl5cjup-bk38", "b-mvkyu7wy-5pv0", "q-mvl5cjur-3ymv"], ["b-mvl5cjv6-i1cb", "b-mvkyu7p8-mbmt", "q-mvl5cjv7-4kax"], ["b-mvl5cq5j-i1p9", "b-mvl02kiv-0q7l", "q-mvl5cq5k-4l89"], ["b-mvl5cq62-riqi", "b-mvl02klx-f2ak", "q-mvl5cq62-f0br"], ["b-mvl5cq6d-uhvg", "b-mvl4ytl2-jfj5", "q-mvl5cq6e-1xsm"], ["b-mvl5cq6s-4o1u", "b-mvkyu7pb-c22n", "q-mvl5cq6t-tuk9"], ["b-mvl5cq74-72sp", "b-mvkyu7pb-kq3o", "q-mvl5cq75-muiz"], ["b-mvl5d190-tew2", "b-mvkyu7jh-92ls", "q-mvl5d190-udu0"], ["b-mvl5d19c-ts61", "b-mvkyu7k8-d7o7", "q-mvl5d19d-60yi"], ["b-mvl5d19q-mf12", "b-mvkyu7ob-v81o", "q-mvl5d19r-fvbg"], ["b-mvl5d1a2-ubra", "b-mvkyu7m2-qdzh", "q-mvl5d1a4-l04h"], ["b-mvl5d1af-8new", "b-mvkyu7lo-9diq", "q-mvl5d1ag-mkq5"], ["b-mvl5d1as-35af", "b-mvl02kk4-er52", "q-mvl5d1as-vu7m"], ["b-mvl5d1b4-unva", "b-mvkyu7kq-unwa", "q-mvl5d1b5-taml"], ["b-mvl5d1bh-6jgg", "b-mvkyu7kp-uacg", "q-mvl5d1bi-noa6"], ["b-mvl5d1bt-jlgc", "b-mvkyu7k9-8ftl", "q-mvl5d1bu-na18"], ["b-mvl5d1c7-rv91", "b-mvkyu7jm-9pv8", "q-mvl5d1c7-gy5l"], ["b-mvl5d1cn-dcyy", "b-mvkyu7ip-9bpk", "q-mvl5d1cn-an2x"], ["b-mvl5d1d1-mkrp", "b-mvkyu7in-v33l", "q-mvl5d1d2-jgqc"], ["b-mvl5d1dg-5maq", "w-mvkyu8ni-u3m5", "q-mvl5d1dh-tslp"], ["b-mvl5d1dt-n5sr", "b-mvkyu7pj-ceid", "q-mvl5d1du-3kah"], ["b-mvl5d1e6-aham", "b-mvkyu7hv-tait", "q-mvl5d1e7-qaeq"]];
+      let n = 0;
+      for (const [from, into, qid] of PAIRS) {
+        const f = Lib.get(from), t = Lib.get(into); if (!f || !t) continue;
+        Lib.mergeInto(t, f); if (Lib.queue()[qid]) Lib.qDel(qid); n++;
+      }
+      // 「創世の島」：ブクログの記録 2-37 との結び付きを戻す
+      const it0 = Lib.get("b-mvkyu7ot-bz5l"), x = booklogItems().find(y => y.id === "2-37");
+      if (it0 && x && it0.blk !== "2-37" && !(it0.blks || []).includes("2-37")) {
+        const it = JSON.parse(JSON.stringify(it0));
+        if (!it.blk) { it.blk = "2-37"; it.blkKey = blKey(x); } else { it.blks = [...(it.blks || []), "2-37"]; it.blkKeys = [...(it.blkKeys || []), blKey(x)]; }
+        it.blkRead = it.blkRead || 1; Lib.put(it);
+      }
+      log.push(`前に「同じ本」と答えた本がもう一度確認待ちに出ていたので、まとめ直しました：${n}冊`);
+    },
+  },
 ];
 
 async function runFixes() {

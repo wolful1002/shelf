@@ -422,6 +422,13 @@
     if (from.isbn && x.isbn && from.isbn !== x.isbn) { x.alt = x.alt || []; if (!x.alt.some(y => y.isbn === from.isbn)) x.alt.push({ isbn: from.isbn, pub: from.pub || undefined, fmt: from.fmt || undefined, loc: from.loc || undefined, media: from.media }); }
     if (from.st === "own") x.st = "own";
     if (!x.nk && from.nk) { x.nk = from.nk; x.link = from.link; }
+    // ブクログの記録との結び付きも引き継ぐ（引き継がないと、ブクログの画面で同じ本がまた「未登録」に出て、もう一度登録・確認することになる）
+    const blks = [...new Set([x.blk, ...(x.blks || []), from.blk, ...(from.blks || [])].filter(Boolean))];
+    const keys = [...new Set([x.blkKey, ...(x.blkKeys || []), from.blkKey, ...(from.blkKeys || [])].filter(Boolean))];
+    if (blks.length) { if (!x.blk) x.blk = blks[0]; x.blks = blks.filter(b => b !== x.blk); if (!x.blks.length) delete x.blks; }
+    if (keys.length) { if (!x.blkKey) x.blkKey = keys[0]; x.blkKeys = keys.filter(b => b !== x.blkKey); if (!x.blkKeys.length) delete x.blkKeys; }
+    if (from.blkRead) x.blkRead = 1;
+    if (from.blkCat && !x.blkCat) x.blkCat = from.blkCat;
     const r = L.reading()["b:" + from.id]; if (r && !L.reading()["b:" + x.id]) { L.setReading("b:" + x.id, r); }
     if (r) L.setReading("b:" + from.id, null);
     L.put(x); L.qDelFor(from.id); L.remove(from.id);
