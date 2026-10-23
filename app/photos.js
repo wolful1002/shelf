@@ -1,14 +1,16 @@
 // 本棚の写真からの一括登録
-// 1. 棚（保管場所）を選んで写真を送る → 記録の保管場所の inbox/shelf/<束の番号>/ に写真と batch.json を置く
+// 1. 棚（保管場所）を選んで写真を撮り、端末に取っておく → 後ろで順に inbox/shelf/<束の番号>/ に写真と batch.json を送る
 // 2. Claude が会話で写真を読み、背表紙の書名・著者を candidates.json に書く（「本棚の写真を読んで」と頼む）
 // 3. この画面で候補を確かめ、まとめて登録する。持っている本は保管場所をその棚にし、持っていない本は新しく登録する
 "use strict";
 const PH = { dir: "inbox/shelf", files: [], batches: [], open: null, urls: new Map() };
-const b64ofBlob = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(blob); });
+const bufOfBlob = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(blob); });
+const b64ofBuf = buf => { const b = new Uint8Array(buf); let x = ""; for (let i = 0; i < b.length; i += 0x8000) x += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(x); };
 const b64ofText = s => { const b = new TextEncoder().encode(s); let x = ""; for (let i = 0; i < b.length; i += 0x8000) x += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(x); };
 
 // 写真を縮める（長い辺 2800px・JPEG）。背表紙の小さな文字が読める大きさを残す
 async function shrink(file) {
+  if (typeof createImageBitmap !== "function") return file;
   const img = await createImageBitmap(file, { imageOrientation: "from-image" }).catch(() => null);
   if (!img) return file;
   const k = Math.min(1, 2800 / Math.max(img.width, img.height));
@@ -18,13 +20,15 @@ async function shrink(file) {
 }
 
 function phPlaces() {
+  const cur = $("phPlace").value;
   const pl = Object.values(Lib.places());
   $("phPlace").innerHTML = `<option value="">（選んでください）</option>` + pl.map(n => `<option>${esc(n)}</option>`).join("") + `<option value="__new">新しい保管場所…</option>`;
+  if (cur && [...$("phPlace").options].some(o => o.value === cur)) $("phPlace").value = cur;
 }
 $("phPlace").onchange = () => { $("phNewWrap").hidden = $("phPlace").value !== "__new"; phSync(); };
 $("phNewPlace").oninput = phSync;
 function phPlaceName() { return $("phPlace").value === "__new" ? $("phNewPlace").value.trim() : $("phPlace").value; }
-function phSync() { $("phSend").disabled = !PH.files.length || !phPlaceName(); $("phSend").textContent = PH.files.length ? `${PH.files.length}枚を送る` : "送る"; }
+function phSync() { $("phSend").disabled = !PH.files.length || !phPlaceName(); $("phSend").textContent = PH.files.length ? `この棚の写真（${PH.files.length}枚）を取っておく` : "この棚の写真を取っておく"; }
 function addFiles(list) {
   for (const f of list) PH.files.push({ f, url: URL.createObjectURL(f) });
   $("phThumbs").innerHTML = PH.files.map((x, i) => `<figure><img src="${x.url}" alt="${i + 1}枚目"><button type="button" class="small quiet" data-phdel="${i}">外す</button></figure>`).join("");
@@ -34,28 +38,71 @@ $("phCam").onchange = e => { addFiles(e.target.files); e.target.value = ""; };
 $("phPick").onchange = e => { addFiles(e.target.files); e.target.value = ""; };
 $("phThumbs").onclick = e => { const b = e.target.closest("[data-phdel]"); if (!b) return; const x = PH.files.splice(+b.dataset.phdel, 1)[0]; URL.revokeObjectURL(x.url); addFiles([]); };
 
+// ---------- 撮った棚を端末に取っておき、後ろで順に送る ----------
+// 端末の中の置き場（IndexedDB「shelf-photos」）：{ id, place, at, photos:[ArrayBuffer], sent:送り終えた枚数, err }
+const HELD = {
+  db: null,
+  open() {
+    if (this.db) return this.db;
+    return this.db = new Promise((res, rej) => { const r = indexedDB.open("shelf-photos", 1); r.onupgradeneeded = () => r.result.createObjectStore("held", { keyPath: "id" }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  },
+  async tx(mode, fn) { const db = await this.open(); return new Promise((res, rej) => { const t = db.transaction("held", mode); const st = t.objectStore("held"); let out; Promise.resolve(fn(st)).then(v => out = v); t.oncomplete = () => res(out); t.onerror = () => rej(t.error); }); },
+  all() { return this.tx("readonly", st => new Promise(r => { const q = st.getAll(); q.onsuccess = () => r(q.result || []); })); },
+  put(x) { return this.tx("readwrite", st => { st.put(x); }); },
+  del(id) { return this.tx("readwrite", st => { st.delete(id); }); },
+};
 $("phSend").onclick = async () => {
   const place = phPlaceName(); if (!place || !PH.files.length) return;
   if ($("phPlace").value === "__new") Lib.addPlace(place);
-  const id = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-") + "-" + Math.random().toString(36).slice(2, 5);
-  const base = `${PH.dir}/${id}`;
-  $("phSend").disabled = true;
-  const names = [];
+  $("phSend").disabled = true; $("phMsg").textContent = "写真を整えています…";
   try {
-    for (let i = 0; i < PH.files.length; i++) {
-      $("phMsg").textContent = `送っています（${i + 1}/${PH.files.length}）…`;
-      const blob = await shrink(PH.files[i].f);
-      const name = `${i + 1}.jpg`;
-      await Shelf.putRaw(`${base}/${name}`, await b64ofBlob(blob), `本棚の写真：${place}（${i + 1}枚目）`);
-      names.push(name);
-    }
-    const batch = { id, place, at: new Date().toISOString(), device: Shelf.deviceName(), photos: names, status: "new" };
-    await Shelf.putRaw(`${base}/batch.json`, b64ofText(JSON.stringify(batch)), `本棚の写真：${place}（${names.length}枚）`);
+    const photos = [];
+    // 端末に取っておく写真は、どのブラウザでもしまえる形（バイト列）にする
+    for (const x of PH.files) { const bl = await shrink(x.f); photos.push(await bufOfBlob(bl)); }
+    const id = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-") + "-" + Math.random().toString(36).slice(2, 5);
+    await HELD.put({ id, place, at: new Date().toISOString(), photos, sent: 0 });
     PH.files.forEach(x => URL.revokeObjectURL(x.url)); PH.files = []; addFiles([]);
-    $("phMsg").textContent = `送りました。Claude に「本棚の写真を読んで」と伝えてください。`;
-    phLoad();
-  } catch (e) { $("phMsg").textContent = "送れませんでした：" + e.message + (names.length ? `（${names.length}枚は届いています）` : ""); phSync(); }
+    $("phPlace").value = ""; $("phNewPlace").value = ""; $("phNewWrap").hidden = true; phSync();
+    $("phMsg").textContent = `「${place}」の写真を取っておきました。次の棚を選んで撮ってください。`;
+    phHeldShow(); phUpload();
+  } catch (e) { $("phMsg").textContent = "取っておけませんでした：" + e.message; phSync(); }
 };
+async function phHeldShow() {
+  const list = await HELD.all().catch(() => []);
+  $("phHeldBox").hidden = !list.length;
+  $("phHeld").innerHTML = list.sort((a, b) => a.id < b.id ? -1 : 1).map(x => `<li><div class="grow"><div class="t">${esc(x.place)}</div><div class="m"><span>${x.photos.length}枚</span><span class="pill ${x.err ? "warn" : ""}">${x.err ? "送れていません（あとで送り直します）" : PH.sending === x.id ? `送っています（${x.sent}/${x.photos.length}）` : "送る順番を待っています"}</span></div></div>${PH.sending === x.id ? "" : `<button type="button" class="small quiet" data-phheld="${esc(x.id)}">取りやめる</button>`}</li>`).join("");
+}
+$("phHeld").onclick = async e => {
+  const b = e.target.closest("[data-phheld]"); if (!b || PH.sending === b.dataset.phheld) return;
+  if (!confirm("この棚の写真を送らずに消します。よろしいですか？")) return;
+  await HELD.del(b.dataset.phheld); phHeldShow();
+};
+// 取っておいた棚を1つずつ送る。途中で画面を閉じても、次に開いたとき続きから送る
+async function phUpload() {
+  if (PH.uploading) return; PH.uploading = true;
+  try {
+    for (;;) {
+      const list = (await HELD.all().catch(() => [])).sort((a, b) => a.id < b.id ? -1 : 1);
+      const x = list.find(y => !y.err) || null;
+      if (!x) break;
+      PH.sending = x.id; phHeldShow();
+      const base = `${PH.dir}/${x.id}`;
+      try {
+        for (let i = x.sent; i < x.photos.length; i++) {
+          await Shelf.putRaw(`${base}/${i + 1}.jpg`, b64ofBuf(x.photos[i]), `本棚の写真：${x.place}（${i + 1}枚目）`);
+          x.sent = i + 1; await HELD.put(x); phHeldShow();
+        }
+        const batch = { id: x.id, place: x.place, at: x.at, device: Shelf.deviceName(), photos: x.photos.map((_, i) => `${i + 1}.jpg`), status: "new" };
+        await Shelf.putRaw(`${base}/batch.json`, b64ofText(JSON.stringify(batch)), `本棚の写真：${x.place}（${x.photos.length}枚）`);
+        await HELD.del(x.id);
+        phLoad();
+      } catch (e) { x.err = e.message; await HELD.put(x); }
+    }
+  } finally { PH.uploading = false; PH.sending = null; phHeldShow(); }
+}
+// 送れなかった棚は、電波が戻ったときと画面を開いたときに送り直す
+async function phRetry() { const list = await HELD.all().catch(() => []); for (const x of list) if (x.err) { delete x.err; await HELD.put(x); } phUpload(); }
+addEventListener("online", phRetry);
 
 // ---------- 束の一覧 ----------
 const ST = { new: ["warn", "読み取り待ち"], read: ["acc", "候補あり・確かめてください"], part: ["acc", "一部を登録済み"], done: ["ok", "登録済み"] };
@@ -71,7 +118,7 @@ async function phLoad() {
   $("phBatches").innerHTML = PH.batches.map(b => `<li><div><div class="t">${esc(b.place)}</div><div class="m"><span>${esc(b.at.slice(0, 16).replace("T", " "))}</span><span>${b.photos.length}枚</span><span class="pill ${ST[b.status]?.[0] || ""}">${esc(ST[b.status]?.[1] || b.status)}</span>${b.result ? `<span>${esc(b.result)}</span>` : ""}</div></div>${b.status === "read" || b.status === "part" ? `<button type="button" class="small pri" data-phopen="${esc(b.dir)}">確かめる</button>` : b.status === "done" ? `<button type="button" class="small quiet" data-phopen="${esc(b.dir)}">見る・直す</button>` : ""}</li>`).join("") || `<li class="empty">まだ送った写真はありません</li>`;
   const waiting = PH.batches.filter(b => b.status === "new").length;
   $("phHint").hidden = !waiting;
-  $("phHint").textContent = `読み取り待ちが ${waiting} 束あります。Claude との会話で「本棚の写真を読んで」と頼むと、書名の候補が作られます。`;
+  $("phHint").textContent = `読み取り待ちの棚が ${waiting} つあります。撮り終えたら、Claude との会話で「本棚の写真を読んで」と頼んでください。まとめて読み取ります。`;
 }
 $("phReload").onclick = phLoad;
 $("phBatches").onclick = e => { const b = e.target.closest("[data-phopen]"); if (b) phOpen(b.dataset.phopen); };
@@ -232,4 +279,4 @@ async function phRegister() {
   await phLoad(); render("photos");
 }
 
-function renderPhotos() { phPlaces(); if (!PH.loaded) { PH.loaded = true; phLoad(); } }
+function renderPhotos() { phPlaces(); if (!PH.loaded) { PH.loaded = true; phLoad(); phHeldShow(); phRetry(); } }

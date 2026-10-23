@@ -9,8 +9,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app/ui.css?v=202610231449">
-<link rel="stylesheet" href="app/bar.css?v=202610231449">
+<link rel="stylesheet" href="app/ui.css?v=202610231507">
+<link rel="stylesheet" href="app/bar.css?v=202610231507">
 <style>
 .phthumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .phthumbs figure{margin:0;display:grid;gap:4px;justify-items:center}
@@ -175,14 +175,15 @@
 
   <!-- 本棚の写真 -->
   <section class="panel card" id="p-photos" aria-label="本棚の写真" hidden>
-    <p class="small muted">棚ごとに背表紙が読めるように写真を撮って送ると、Claude が書名と著者を読み取ります。読み取った候補をここで確かめて、まとめて登録します。持っている本には保管場所が入ります。</p>
-    <h3>1. 写真を送る</h3>
+    <p class="small muted">棚を選んで写真を撮り「この棚の写真を取っておく」を押すと、次の棚に進めます。撮った写真は後ろで順に送ります（電波が無いときは端末に取っておき、つながったら送ります）。いくつかの棚を撮り終えたら、Claude に「本棚の写真を読んで」と頼んでください。読み取った候補は、あとで棚ごとに確かめて登録できます。</p>
+    <h3>1. 棚ごとに写真を撮る</h3>
     <div class="grid2"><label class="f">どの棚の写真ですか<select id="phPlace"></select></label><label class="f" id="phNewWrap" hidden>新しい保管場所の名前<input type="text" id="phNewPlace" placeholder="例：書斎・本棚A・1段目"></label></div>
     <p class="small muted">1枚に1段ほどが目安です。背表紙の文字が読める近さで、正面から撮ってください。</p>
-    <div class="row"><label class="btn">写真を撮る<input type="file" id="phCam" accept="image/*" capture="environment" hidden></label><label class="btn quiet">写真を選ぶ（何枚でも）<input type="file" id="phPick" accept="image/*" multiple hidden></label><button type="button" class="pri" id="phSend" disabled>送る</button></div>
+    <div class="row"><label class="btn">写真を撮る<input type="file" id="phCam" accept="image/*" capture="environment" hidden></label><label class="btn quiet">写真を選ぶ（何枚でも）<input type="file" id="phPick" accept="image/*" multiple hidden></label><button type="button" class="pri" id="phSend" disabled>この棚の写真を取っておく</button></div>
     <div class="phthumbs" id="phThumbs"></div>
     <p class="small" id="phMsg" role="status"></p>
-    <h3>2. 送った写真</h3>
+    <div id="phHeldBox" hidden><h3>撮った棚（順に送っています）</h3><ul class="list" id="phHeld"></ul></div>
+    <h3>2. 送った棚・候補を確かめる</h3>
     <p class="small notice" id="phHint" hidden></p>
     <ul class="list" id="phBatches"></ul>
     <div class="row"><button type="button" class="small quiet" id="phReload">読み込み直す</button></div>
@@ -201,13 +202,13 @@
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-<script src="app/store.js?v=202610231449"></script>
-<script src="app/biblio.js?v=202610231449"></script>
-<script src="app/scan.js?v=202610231449"></script>
-<script src="app/ui.js?v=202610231449"></script>
-<script src="app/lib.js?v=202610231449"></script>
-<script src="app/fixes.js?v=202610231449"></script>
-<script src="app/library.js?v=202610231449"></script>
-<script src="app/photos.js?v=202610231449"></script>
+<script src="app/store.js?v=202610231507"></script>
+<script src="app/biblio.js?v=202610231507"></script>
+<script src="app/scan.js?v=202610231507"></script>
+<script src="app/ui.js?v=202610231507"></script>
+<script src="app/lib.js?v=202610231507"></script>
+<script src="app/fixes.js?v=202610231507"></script>
+<script src="app/library.js?v=202610231507"></script>
+<script src="app/photos.js?v=202610231507"></script>
 </body>
 </html>
