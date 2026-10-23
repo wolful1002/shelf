@@ -323,6 +323,31 @@
     },
     refresh,
     flush,
+    // 写真などのファイルをそのまま保管場所に置く（base64：中身を base64 にした文字列）。送信待ちには入れず、その場で送る
+    async putRaw(path, base64, message) {
+      let sha = null;
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        const res = await gh(`/contents/${encodeURI(path)}`, { method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: message || `アプリから追加：${path}`, branch: BRANCH, content: base64, sha: sha || undefined }) });
+        if (res.ok) return (await res.json()).content.sha;
+        if ((res.status === 409 || res.status === 422) && attempt < 4) { sha = await currentSha(path); continue; }
+        let why = ""; try { why = (await res.json()).message || ""; } catch {}
+        throw new Error(`送れませんでした（${res.status}${why ? "：" + why : ""}）`);
+      }
+    },
+    // 保管場所のフォルダの中身（名前と種類）。無ければ []
+    async listRemote(dir) {
+      const res = await gh(`/contents/${encodeURI(dir)}?ref=${BRANCH}`);
+      if (res.status === 404) return [];
+      if (!res.ok) throw new Error("一覧を取れませんでした（" + res.status + "）");
+      return (await res.json()).map(x => ({ name: x.name, type: x.type, path: x.path, size: x.size }));
+    },
+    // 写真などをそのまま読む（Blob）
+    async readRemoteBlob(path) {
+      const res = await gh(`/contents/${encodeURI(path)}?ref=${BRANCH}`, { headers: { Accept: "application/vnd.github.raw+json" } });
+      if (!res.ok) throw new Error("ファイルを取れませんでした（" + res.status + "）");
+      return await res.blob();
+    },
     // 端末に写しを持たないファイル（import/ など）を、その場で保管場所から読む。無ければ null
     async readRemote(path) {
       const res = await gh(`/contents/${encodeURI(path)}?ref=${BRANCH}`, { headers: { Accept: "application/vnd.github.raw+json" } });

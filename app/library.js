@@ -5,7 +5,7 @@ UI.topbar("library.html");
 const CATS = Biblio.CATS;
 
 // ---------- 画面の切り替え ----------
-const TABS = ["register", "list", "queue", "stats", "places", "booklog", "off"];
+const TABS = ["register", "list", "queue", "stats", "places", "booklog", "photos", "off"];
 function showTab() {
   const t = TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "register";
   for (const x of TABS) { $("p-" + x).hidden = x !== t; document.querySelector(`[data-tab="${x}"]`).setAttribute("aria-current", x === t ? "true" : "false"); }
@@ -21,6 +21,7 @@ function render(t = location.hash.slice(1) || "register") {
   else if (t === "places") renderPlaces();
   else if (t === "booklog") renderBooklog();
   else if (t === "off") renderOff();
+  else if (t === "photos") { if (typeof renderPhotos === "function") renderPhotos(); }
   else renderLocSelect();
 }
 
