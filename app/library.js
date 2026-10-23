@@ -742,7 +742,7 @@ function fixBooklogRead() {
 
 // ---------- 外した本 ----------
 function renderOff() {
-  const rows = Object.values(Lib.items()).filter(it => it.st !== "own").sort((a, b) => (a.u < b.u ? 1 : -1));
+  const rows = Object.values(Lib.items()).filter(it => it.st === "off" || it.st === "gone").sort((a, b) => (a.u < b.u ? 1 : -1));
   $("offList").innerHTML = rows.map(it => `<li><div><div class="t">${esc(it.t)}</div><div class="m"><span>${esc(it.a || "")}</span><span class="pill ${it.st === "gone" ? "" : "warn"}">${it.st === "gone" ? "手放した" : "所有を外した"}</span></div></div><button type="button" class="small" data-back="${esc(it.id)}">所有に戻す</button></li>`).join("") || `<li class="empty">ありません</li>`;
 }
 $("offList").addEventListener("click", e => { const b = e.target.closest("[data-back]"); if (!b) return; Lib.setStatus(Lib.get(b.dataset.back), "own"); UI.toast("所有に戻しました"); setTimeout(renderOff, 50); });

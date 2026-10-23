@@ -234,15 +234,18 @@
     // 同じ作品に結び付いた記録が複数あれば、所有中で、実物の情報がある（スキャンなどで登録した）記録を代表にする
     const rank = it => (it.st === "own" ? 2 : 0) + (touched(it) ? 1 : 0);
     const byNk = new Map(); for (const it of items) if (it.nk && it.kind !== "series") { const cur = byNk.get(it.nk); if (!cur || rank(it) > rank(cur)) byNk.set(it.nk, it); }
-    // 代表でない仮登録が所有のまま残っていれば、静かに外して重複をなくす
-    for (const it of items) if (it.nk && it.kind !== "series" && it.st === "own" && !touched(it) && byNk.get(it.nk) !== it) { const c = clone(it); c.st = "off"; c.merged = byNk.get(it.nk).id; L.put(c); }
+    // 代表でない仮登録（書名と著者だけの記録）は、実物の記録にまとまっているので消す（「外した本」に重複して出さない）
+    for (const it of items) if (it.nk && it.kind !== "series" && !touched(it) && byNk.get(it.nk) && byNk.get(it.nk) !== it && (it.st === "own" || it.merged)) { L.qDelFor(it.id); L.remove(it.id); }
     const works = Shelf.read(P.novels); const wk = works ? new Map(works.books.map(b => [b.k, b])) : null;
     let added = 0, offed = 0;
     for (const k of Object.keys(own)) {
       const it = byNk.get(k);
       if (!it) {
         const w = wk?.get(k); if (!w) continue;
-        L.put({ id: "b-ck-" + k + (L.get("b-ck-" + k) ? "-" + Date.now().toString(36) : ""), kind: "book", cat: "小説", t: w.t, a: w.a, st: "own", src: "checker", nk: k, link: "auto", added: now() });
+        // 同じ作品の仮登録を何件も作らない（番号は作品ごとに1つ）
+        const old = L.get("b-ck-" + k);
+        if (old) { const c = clone(old); c.st = "own"; delete c.merged; c.nk = k; L.put(c); }
+        else L.put({ id: "b-ck-" + k, kind: "book", cat: "小説", t: w.t, a: w.a, st: "own", src: "checker", nk: k, link: "auto", added: now() });
         added++;
       } else if (it.st !== "own") { const c = clone(it); c.st = "own"; L.put(c); L.qDelFor(it.id); }
     }
