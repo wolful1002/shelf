@@ -8,15 +8,21 @@ const bufOfBlob = blob => new Promise((res, rej) => { const r = new FileReader()
 const b64ofBuf = buf => { const b = new Uint8Array(buf); let x = ""; for (let i = 0; i < b.length; i += 0x8000) x += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(x); };
 const b64ofText = s => { const b = new TextEncoder().encode(s); let x = ""; for (let i = 0; i < b.length; i += 0x8000) x += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(x); };
 
-// 写真を縮める（長い辺 2800px・JPEG）。背表紙の小さな文字が読める大きさを残す
+// 写真を縮める（長い辺 2800px・JPEG）。背表紙の小さな文字が読める大きさを残す。
+// 縮められなかったとき（古い端末・メモリ不足など）は元の写真のまま使う。使い終えた画像はすぐ手放す（何十枚でも続けて扱えるように）
 async function shrink(file) {
   if (typeof createImageBitmap !== "function") return file;
-  const img = await createImageBitmap(file, { imageOrientation: "from-image" }).catch(() => null);
-  if (!img) return file;
-  const k = Math.min(1, 2800 / Math.max(img.width, img.height));
-  const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-  return await new Promise(r => c.toBlob(r, "image/jpeg", 0.86));
+  let img = null, c = null;
+  try {
+    img = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const k = Math.min(1, 2800 / Math.max(img.width, img.height));
+    c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    const g = c.getContext("2d"); if (!g) return file;
+    g.drawImage(img, 0, 0, c.width, c.height);
+    const out = await new Promise(r => c.toBlob(r, "image/jpeg", 0.86));
+    return out && out.size ? out : file;
+  } catch { return file; }
+  finally { try { img?.close?.(); } catch {} if (c) { c.width = 0; c.height = 0; } }
 }
 
 function phPlaces() {
@@ -39,38 +45,55 @@ $("phPick").onchange = e => { addFiles(e.target.files); e.target.value = ""; };
 $("phThumbs").onclick = e => { const b = e.target.closest("[data-phdel]"); if (!b) return; const x = PH.files.splice(+b.dataset.phdel, 1)[0]; URL.revokeObjectURL(x.url); addFiles([]); };
 
 // ---------- 撮った棚を端末に取っておき、後ろで順に送る ----------
-// 端末の中の置き場（IndexedDB「shelf-photos」）：{ id, place, at, photos:[ArrayBuffer], sent:送り終えた枚数, err }
+// 端末の中の置き場（IndexedDB「shelf-photos」）。棚の情報 held：{ id, place, at, n:枚数, sent:送り終えた枚数, err }。
+// 写真は1枚ずつ pics に分けてしまう（キー "<id>/<番号>"・中身はバイト列）。まとめて1つにすると、枚数が多いとしまえないことがあるため
 const HELD = {
   db: null,
   open() {
     if (this.db) return this.db;
-    return this.db = new Promise((res, rej) => { const r = indexedDB.open("shelf-photos", 1); r.onupgradeneeded = () => r.result.createObjectStore("held", { keyPath: "id" }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    return this.db = new Promise((res, rej) => {
+      const r = indexedDB.open("shelf-photos", 2);
+      r.onupgradeneeded = () => { const db = r.result; for (const n of [...db.objectStoreNames]) db.deleteObjectStore(n); db.createObjectStore("held", { keyPath: "id" }); db.createObjectStore("pics"); };
+      r.onsuccess = () => res(r.result); r.onerror = () => { this.db = null; rej(r.error); };
+    });
   },
-  async tx(mode, fn) { const db = await this.open(); return new Promise((res, rej) => { const t = db.transaction("held", mode); const st = t.objectStore("held"); let out; Promise.resolve(fn(st)).then(v => out = v); t.oncomplete = () => res(out); t.onerror = () => rej(t.error); }); },
-  all() { return this.tx("readonly", st => new Promise(r => { const q = st.getAll(); q.onsuccess = () => r(q.result || []); })); },
-  put(x) { return this.tx("readwrite", st => { st.put(x); }); },
-  del(id) { return this.tx("readwrite", st => { st.delete(id); }); },
+  async run(store, mode, fn) {
+    const db = await this.open();
+    return new Promise((res, rej) => { const t = db.transaction(store, mode); let out; const q = fn(t.objectStore(store)); if (q) q.onsuccess = () => { out = q.result; }; t.oncomplete = () => res(out); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error("端末にしまえませんでした（空き容量が足りない可能性があります）")); });
+  },
+  all() { return this.run("held", "readonly", st => st.getAll()).then(x => x || []); },
+  put(x) { return this.run("held", "readwrite", st => st.put(x)); },
+  pic(id, i) { return this.run("pics", "readonly", st => st.get(`${id}/${i}`)); },
+  putPic(id, i, buf) { return this.run("pics", "readwrite", st => st.put(buf, `${id}/${i}`)); },
+  async del(id, n) { await this.run("held", "readwrite", st => st.delete(id)); await this.run("pics", "readwrite", st => st.delete(IDBKeyRange.bound(`${id}/`, `${id}/￿`))); },
 };
 $("phSend").onclick = async () => {
   const place = phPlaceName(); if (!place || !PH.files.length) return;
   if ($("phPlace").value === "__new") Lib.addPlace(place);
-  $("phSend").disabled = true; $("phMsg").textContent = "写真を整えています…";
+  $("phSend").disabled = true;
+  const id = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-") + "-" + Math.random().toString(36).slice(2, 5);
+  const files = PH.files.map(x => x.f);
   try {
-    const photos = [];
-    // 端末に取っておく写真は、どのブラウザでもしまえる形（バイト列）にする
-    for (const x of PH.files) { const bl = await shrink(x.f); photos.push(await bufOfBlob(bl)); }
-    const id = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-") + "-" + Math.random().toString(36).slice(2, 5);
-    await HELD.put({ id, place, at: new Date().toISOString(), photos, sent: 0 });
+    // 1枚ずつ縮めて、すぐ端末にしまう（全部を同時にメモリに持たない）
+    for (let i = 0; i < files.length; i++) {
+      $("phMsg").textContent = `写真を整えています（${i + 1}/${files.length}）…`;
+      await HELD.putPic(id, i, await bufOfBlob(await shrink(files[i])));
+    }
+    await HELD.put({ id, place, at: new Date().toISOString(), n: files.length, sent: 0 });
     PH.files.forEach(x => URL.revokeObjectURL(x.url)); PH.files = []; addFiles([]);
     $("phPlace").value = ""; $("phNewPlace").value = ""; $("phNewWrap").hidden = true; phSync();
-    $("phMsg").textContent = `「${place}」の写真を取っておきました。次の棚を選んで撮ってください。`;
+    $("phMsg").textContent = `「${place}」の写真（${files.length}枚）を取っておきました。次の棚を選んで撮ってください。`;
     phHeldShow(); phUpload();
-  } catch (e) { $("phMsg").textContent = "取っておけませんでした：" + e.message; phSync(); }
+  } catch (e) {
+    await HELD.del(id).catch(() => {});
+    $("phMsg").textContent = `取っておけませんでした（${e?.message || e}）。写真は消えていないので、もう一度押してみてください。続けて出るときは、この文をそのまま Claude に伝えてください。`;
+    phSync();
+  }
 };
 async function phHeldShow() {
   const list = await HELD.all().catch(() => []);
   $("phHeldBox").hidden = !list.length;
-  $("phHeld").innerHTML = list.sort((a, b) => a.id < b.id ? -1 : 1).map(x => `<li><div class="grow"><div class="t">${esc(x.place)}</div><div class="m"><span>${x.photos.length}枚</span><span class="pill ${x.err ? "warn" : ""}">${x.err ? "送れていません（あとで送り直します）" : PH.sending === x.id ? `送っています（${x.sent}/${x.photos.length}）` : "送る順番を待っています"}</span></div></div>${PH.sending === x.id ? "" : `<button type="button" class="small quiet" data-phheld="${esc(x.id)}">取りやめる</button>`}</li>`).join("");
+  $("phHeld").innerHTML = list.sort((a, b) => a.id < b.id ? -1 : 1).map(x => `<li><div class="grow"><div class="t">${esc(x.place)}</div><div class="m"><span>${x.n}枚</span><span class="pill ${x.err ? "warn" : ""}">${x.err ? "送れていません（あとで送り直します）" : PH.sending === x.id ? `送っています（${x.sent}/${x.n}）` : "送る順番を待っています"}</span></div></div>${PH.sending === x.id ? "" : `<button type="button" class="small quiet" data-phheld="${esc(x.id)}">取りやめる</button>`}</li>`).join("");
 }
 $("phHeld").onclick = async e => {
   const b = e.target.closest("[data-phheld]"); if (!b || PH.sending === b.dataset.phheld) return;
@@ -88,12 +111,13 @@ async function phUpload() {
       PH.sending = x.id; phHeldShow();
       const base = `${PH.dir}/${x.id}`;
       try {
-        for (let i = x.sent; i < x.photos.length; i++) {
-          await Shelf.putRaw(`${base}/${i + 1}.jpg`, b64ofBuf(x.photos[i]), `本棚の写真：${x.place}（${i + 1}枚目）`);
+        for (let i = x.sent; i < x.n; i++) {
+          const buf = await HELD.pic(x.id, i); if (!buf) throw new Error(`${i + 1}枚目の写真が端末に見つかりません`);
+          await Shelf.putRaw(`${base}/${i + 1}.jpg`, b64ofBuf(buf), `本棚の写真：${x.place}（${i + 1}枚目）`);
           x.sent = i + 1; await HELD.put(x); phHeldShow();
         }
-        const batch = { id: x.id, place: x.place, at: x.at, device: Shelf.deviceName(), photos: x.photos.map((_, i) => `${i + 1}.jpg`), status: "new" };
-        await Shelf.putRaw(`${base}/batch.json`, b64ofText(JSON.stringify(batch)), `本棚の写真：${x.place}（${x.photos.length}枚）`);
+        const batch = { id: x.id, place: x.place, at: x.at, device: Shelf.deviceName(), photos: Array.from({ length: x.n }, (_, i) => `${i + 1}.jpg`), status: "new" };
+        await Shelf.putRaw(`${base}/batch.json`, b64ofText(JSON.stringify(batch)), `本棚の写真：${x.place}（${x.n}枚）`);
         await HELD.del(x.id);
         phLoad();
       } catch (e) { x.err = e.message; await HELD.put(x); }
