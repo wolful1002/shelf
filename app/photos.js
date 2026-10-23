@@ -150,17 +150,19 @@ $("phReview").addEventListener("input", e => {
   const c = PHC.items[+li.dataset.phc], k = e.target.dataset.k; if (!k || c.done) return;
   if (k === "on") { if (c.m.owned) c.move = e.target.checked; else c.on = e.target.checked; phRegBtn(); return; }
   c[k] = k === "vol" ? (e.target.value.trim() === "" ? null : e.target.value.trim()) : e.target.value;
-  c.fixed = true;
+  // 直し始めたら、その場でチェックを付ける（見えている状態と同じにする。直したあとチェックを押すと外れる）
+  if (!c.fixed || !(c.m.owned ? c.move : c.on)) { c.fixed = true; if (c.m.owned) c.move = true; else c.on = true; li.querySelector('[data-k="on"]').checked = true; phRegBtn(); }
 });
 $("phReview").addEventListener("change", e => {
   const li = e.target.closest("[data-phc]"); if (!li || !PHC || e.target.dataset.k === "on") return;
-  // 書名・著者・巻を直したら、蔵書との照合をやり直し、その本にチェックを付ける（行は作り直さない。チェックの操作が消えないように）
+  // 書名・著者・巻を直し終えたら、蔵書との照合をやり直す（行は作り直さない。チェックの操作が消えないように）
   const c = PHC.items[+li.dataset.phc]; if (c.done) return;
+  const was = c.m.owned ? c.move : c.on;
   c.m = phMatch(c);
-  if (c.m.owned) c.move = true; else c.on = true;
+  if (c.m.owned) c.move = was; else c.on = was;
   li.querySelector(".phst").innerHTML = phStatus(c);
   li.querySelector(".phlbl").textContent = c.m.owned ? "保管場所をこの棚にする" : "登録する";
-  li.querySelector('[data-k="on"]').checked = true;
+  li.querySelector('[data-k="on"]').checked = was;
   phRegBtn();
 });
 
