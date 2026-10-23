@@ -683,7 +683,7 @@ $("blReg").onclick = async () => {
     const x = all.get(id); if (!x) continue;
     const ebook = /kindle|電子|ebook/i.test(x.type || "");
     const r = await Lib.register({ t: x.t, a: x.a, src: "booklog", media: ebook ? "ebook" : "paper", bib: { t: x.t, a: x.a }, catHint: blCat(x) });
-    const it = JSON.parse(JSON.stringify(r.item)); it.blk = id; it.blkKey = blKey(x);
+    const it = JSON.parse(JSON.stringify(r.item)); it.blk = id; it.blkKey = blKey(x); it.blkCat = 2;
     markBooklogRead(it, r.vol, x.d); n++;
   }
   if (skip.length) setBlSeen(m => { for (const x of skip) m[blKey(x)] = 1; });
