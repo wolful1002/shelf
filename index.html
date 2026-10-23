@@ -10,8 +10,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app/ui.css?v=202610222316">
-<link rel="stylesheet" href="app/bar.css?v=202610222316">
+<link rel="stylesheet" href="app/ui.css?v=202610231007">
+<link rel="stylesheet" href="app/bar.css?v=202610231007">
 </head>
 <body>
 <main class="wrap" id="main">
@@ -50,14 +50,23 @@
       <button type="button" class="quiet" id="keyEdit">鍵を入れ直す</button>
     </div>
   </section>
+
+  <section class="card" aria-labelledby="svcH">
+    <h2 id="svcH">外部サービスの鍵</h2>
+    <p class="small muted">映画・ドラマの情報（TMDB）を使うための鍵です。記録の保管場所（非公開）に置き、このアプリとClaudeの定期タスクだけが使います。会話には貼らないでください。</p>
+    <div class="row">
+      <label class="f grow">TMDB の鍵（API キー、または API 読み取りアクセストークン）<input type="password" id="tmdbIn" autocomplete="off" placeholder="未設定"></label>
+    </div>
+    <div class="row"><button type="button" class="pri" id="tmdbSave">保存して確かめる</button><span class="small muted" id="tmdbMsg"></span></div>
+  </section>
 </main>
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
-<script src="app/store.js?v=202610222316"></script>
-<script src="app/biblio.js?v=202610222316"></script>
-<script src="app/scan.js?v=202610222316"></script>
-<script src="app/ui.js?v=202610222316"></script>
-<script src="app/lib.js?v=202610222316"></script>
+<script src="app/store.js?v=202610231007"></script>
+<script src="app/biblio.js?v=202610231007"></script>
+<script src="app/scan.js?v=202610231007"></script>
+<script src="app/ui.js?v=202610231007"></script>
+<script src="app/lib.js?v=202610231007"></script>
 <script>
 "use strict";
 const { $, esc } = UI;
@@ -65,14 +74,34 @@ UI.topbar("index.html");
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 
 $("keyEdit").onclick = () => { $("main").prepend(UI.keyCard()); window.scrollTo(0, 0); };
+// TMDB の鍵：記録の保管場所の records/keys.json に置く。保存の前に TMDB に問い合わせて使えるか確かめる
+const KEYS = "records/keys.json";
+async function tmdbCheck(k) {
+  const v4 = k.length > 60;   // 読み取りアクセストークン（長い）か、API キー（32文字）か
+  const url = "https://api.themoviedb.org/3/configuration" + (v4 ? "" : "?api_key=" + encodeURIComponent(k));
+  const r = await fetch(url, { headers: v4 ? { Authorization: "Bearer " + k } : {} });
+  return r.ok;
+}
+function tmdbShow() {
+  const k = Shelf.read(KEYS)?.tmdb;
+  $("tmdbIn").placeholder = k ? "設定済み（入れ直すときだけ入力）" : "未設定";
+}
+$("tmdbSave").onclick = async () => {
+  const k = $("tmdbIn").value.trim(); if (!k) { $("tmdbMsg").textContent = "鍵を入れてください"; return; }
+  $("tmdbMsg").textContent = "TMDB に確かめています…";
+  let ok = false; try { ok = await tmdbCheck(k); } catch (_) {}
+  if (!ok) { $("tmdbMsg").textContent = "この鍵では TMDB を使えませんでした。コピーした範囲を確かめてください"; return; }
+  Shelf.writeDoc(KEYS, { ...(Shelf.read(KEYS) || {}), tmdb: k, tmdbType: k.length > 60 ? "token" : "key", updated: new Date().toISOString() });
+  $("tmdbIn").value = ""; $("tmdbMsg").textContent = "保存しました"; tmdbShow();
+};
 
 (async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); $("notices").innerHTML = `<p class="small muted">鍵を設定すると表示されます。</p>`; return; }
-  await Shelf.init({ need: ["records/library/", "records/queue.json", "records/reading.json", "records/settings.json", "records/novels-checker/books.json", "works/novels.json", "works/films.json"] });
+  await Shelf.init({ need: ["records/keys.json", "records/library/", "records/queue.json", "records/reading.json", "records/settings.json", "records/novels-checker/books.json", "works/novels.json", "works/films.json"] });
   const ready = () => { const n = Shelf.read(Lib.P.novels), f = Shelf.read(Lib.P.films); if (n) Biblio.setNovels(n); if (f) Biblio.setFilms(f); };
   ready(); Shelf.on(Lib.P.novels, ready); Shelf.on(Lib.P.films, ready);
   Lib.reconcile();
-  renderNotices();
+  renderNotices(); tmdbShow(); Shelf.on(KEYS, tmdbShow);
   Shelf.onAny(p => { if (/records\/(queue|library|novels-checker)/.test(p)) renderNotices(); });
   Shelf.onStatus(() => renderNotices());
 })();
