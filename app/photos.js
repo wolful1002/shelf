@@ -58,7 +58,7 @@ $("phSend").onclick = async () => {
 };
 
 // ---------- 束の一覧 ----------
-const ST = { new: ["warn", "読み取り待ち"], read: ["acc", "候補あり・確かめてください"], done: ["ok", "登録済み"] };
+const ST = { new: ["warn", "読み取り待ち"], read: ["acc", "候補あり・確かめてください"], part: ["acc", "一部を登録済み"], done: ["ok", "登録済み"] };
 async function phLoad() {
   $("phBatches").innerHTML = `<li class="empty">読み込んでいます…</li>`;
   try {
@@ -68,7 +68,7 @@ async function phLoad() {
       return b ? { ...b, dir: d } : null;
     }))).filter(Boolean);
   } catch (e) { $("phBatches").innerHTML = `<li class="empty">読み込めませんでした：${esc(e.message)}</li>`; return; }
-  $("phBatches").innerHTML = PH.batches.map(b => `<li><div><div class="t">${esc(b.place)}</div><div class="m"><span>${esc(b.at.slice(0, 16).replace("T", " "))}</span><span>${b.photos.length}枚</span><span class="pill ${ST[b.status]?.[0] || ""}">${esc(ST[b.status]?.[1] || b.status)}</span>${b.result ? `<span>${esc(b.result)}</span>` : ""}</div></div>${b.status === "read" ? `<button type="button" class="small pri" data-phopen="${esc(b.dir)}">確かめる</button>` : b.status === "done" ? `<button type="button" class="small quiet" data-phopen="${esc(b.dir)}">見る</button>` : ""}</li>`).join("") || `<li class="empty">まだ送った写真はありません</li>`;
+  $("phBatches").innerHTML = PH.batches.map(b => `<li><div><div class="t">${esc(b.place)}</div><div class="m"><span>${esc(b.at.slice(0, 16).replace("T", " "))}</span><span>${b.photos.length}枚</span><span class="pill ${ST[b.status]?.[0] || ""}">${esc(ST[b.status]?.[1] || b.status)}</span>${b.result ? `<span>${esc(b.result)}</span>` : ""}</div></div>${b.status === "read" || b.status === "part" ? `<button type="button" class="small pri" data-phopen="${esc(b.dir)}">確かめる</button>` : b.status === "done" ? `<button type="button" class="small quiet" data-phopen="${esc(b.dir)}">見る・直す</button>` : ""}</li>`).join("") || `<li class="empty">まだ送った写真はありません</li>`;
   const waiting = PH.batches.filter(b => b.status === "new").length;
   $("phHint").hidden = !waiting;
   $("phHint").textContent = `読み取り待ちが ${waiting} 束あります。Claude との会話で「本棚の写真を読んで」と頼むと、書名の候補が作られます。`;
@@ -99,48 +99,69 @@ function phMatch(c) {
   return {};
 }
 let PHC = null;   // 開いている束：{ batch, items:[{...候補, on, move}] }
+const isOn = c => !c.done && (c.m.owned ? c.move : c.on);
 async function phOpen(dir) {
   const b = PH.batches.find(x => x.dir === dir); if (!b) return;
   const cand = await Shelf.readRemote(`${PH.dir}/${dir}/candidates.json`).catch(() => null);
   if (!cand) { UI.toast("候補がまだありません"); return; }
-  PHC = { batch: b, items: cand.items.map((c, i) => { const m = phMatch(c); return { ...c, i, m, on: b.status !== "done" && c.conf !== "low" && !m.cands, move: !m.item?.loc || m.item.loc !== b.place }; }) };
+  PHC = { batch: b, cand, items: cand.items.map((c, i) => {
+    const m = phMatch(c);
+    // 以前の版で登録した束は、登録済みの印が無い。蔵書で持っている本は登録済みとみなす
+    const done = c.done || (b.status !== "read" && m.owned ? { how: "had" } : null);
+    return { ...c, i, m, done, on: !done && c.conf !== "low" && !m.cands, move: !m.item?.loc || m.item.loc !== b.place };
+  }) };
   const photos = await Promise.all(b.photos.map(async p => [p, await photoUrl(`${PH.dir}/${dir}/${p}`)]));
   const byPhoto = new Map(b.photos.map(p => [p, []])); for (const c of PHC.items) (byPhoto.get(c.photo) || byPhoto.set(c.photo, []).get(c.photo)).push(c);
-  $("phReview").innerHTML = `<div class="row"><h3 class="grow">${esc(b.place)}・候補 ${PHC.items.length}冊</h3>${b.status !== "done" ? `<button type="button" class="pri" id="phReg">チェックした本を登録する</button>` : ""}<button type="button" class="quiet small" id="phClose">閉じる</button></div>
-    <p class="small muted">持っている本は、チェックすると保管場所を「${esc(b.place)}」にします。持っていない本は、チェックすると新しく登録します。書名や巻数は直してから登録できます。</p>
+  $("phReview").innerHTML = `<div class="row"><h3 class="grow">${esc(b.place)}・候補 ${PHC.items.length}冊</h3><button type="button" class="pri" id="phReg">チェックした本を登録する</button><button type="button" class="quiet small" id="phClose">閉じる</button></div>
+    <p class="small muted">持っている本は、チェックすると保管場所を「${esc(b.place)}」にします。持っていない本は、チェックすると新しく登録します。書名や巻数を直すと、その本にチェックが付きます。登録した本は「登録済み」になり、残りはあとからでも登録できます。</p>
     ${photos.map(([p, url]) => `<div class="phblock"><a href="${url}" target="_blank" rel="noopener"><img class="phimg" src="${url}" alt="${esc(p)}"></a>
       <ul class="list">${(byPhoto.get(p) || []).map(phRow).join("") || `<li class="empty">この写真からは読み取れませんでした</li>`}</ul></div>`).join("")}
-    ${b.status !== "done" ? `<details><summary>候補にない本を足す</summary><div class="grid2" style="margin-top:8px"><label class="f">書名<input type="text" id="phAddT"></label><label class="f">著者<input type="text" id="phAddA"></label></div><div class="row" style="margin-top:6px"><button type="button" class="small" id="phAddBtn">足す</button></div></details>` : ""}
+    <details><summary>候補にない本を足す</summary><div class="grid2" style="margin-top:8px"><label class="f">書名<input type="text" id="phAddT"></label><label class="f">著者<input type="text" id="phAddA"></label></div><div class="row" style="margin-top:6px"><label class="f" style="display:inline-flex;align-items:center;gap:4px">巻<input type="text" id="phAddV" style="width:4.5em"></label><button type="button" class="small" id="phAddBtn">足す</button></div></details>
     <p class="small" id="phRegMsg"></p>`;
   $("phClose").onclick = () => { $("phReview").innerHTML = ""; PHC = null; };
-  if ($("phReg")) $("phReg").onclick = phRegister;
-  if ($("phAddBtn")) $("phAddBtn").onclick = () => {
+  $("phReg").onclick = phRegister;
+  $("phAddBtn").onclick = () => {
     const t = $("phAddT").value.trim(); if (!t) return;
-    const c = { photo: b.photos[b.photos.length - 1], t, a: $("phAddA").value.trim(), vol: null, conf: "high", note: "手で足した", i: PHC.items.length };
+    const v = $("phAddV").value.trim();
+    const c = { photo: b.photos[b.photos.length - 1], t, a: $("phAddA").value.trim(), vol: v || null, cat: null, conf: "high", note: "手で足した", added: true, i: PHC.items.length };
     c.m = phMatch(c); c.on = true; c.move = true; PHC.items.push(c);
     $("phReview").querySelectorAll(".phblock .list")[b.photos.length - 1].insertAdjacentHTML("beforeend", phRow(c));
-    $("phAddT").value = ""; $("phAddA").value = "";
+    $("phAddT").value = ""; $("phAddA").value = ""; $("phAddV").value = ""; phRegBtn();
   };
+  phRegBtn();
   $("phReview").scrollIntoView({ behavior: "smooth" });
 }
-function phRow(c) {
-  const m = c.m, done = PHC.batch.status === "done";
+function phRegBtn() { const n = PHC.items.filter(isOn).length; $("phReg").disabled = !n; $("phReg").textContent = n ? `チェックした${n}冊を登録する` : "チェックした本を登録する"; }
+const HOW = { vol: "シリーズの巻として登録済み", new: "新しく登録済み", loc: "保管場所を入れました", had: "登録済み" };
+function phStatus(c) {
+  const m = c.m;
+  if (c.done) return `<span class="pill ok">${HOW[c.done.how] || "登録済み"}</span>`;
   const st = m.owned ? `<span class="pill ok">持っています${m.item.loc ? "・" + esc(m.item.loc) : ""}</span>` : m.want ? `<span class="pill acc">読みたい本に入っています</span>` : m.cands ? `<span class="pill warn">同じ書名の本が複数あります</span>` : m.series ? `<span class="pill">シリーズ『${esc(m.item.t)}』のこの巻は未所持</span>` : `<span class="pill">新しく登録</span>`;
-  const label = m.owned ? "保管場所をこの棚にする" : "登録する";
-  return `<li data-phc="${c.i}"><div class="grow"><div class="grid2"><label class="f">書名<input type="text" data-k="t" value="${esc(c.t)}"${done ? " disabled" : ""}></label><label class="f">著者<input type="text" data-k="a" value="${esc(c.a || "")}"${done ? " disabled" : ""}></label></div>
-    <div class="m"><label class="f" style="display:inline-flex;align-items:center;gap:4px">巻<input type="text" data-k="vol" value="${esc(c.vol ?? "")}" style="width:4.5em"${done ? " disabled" : ""}></label>${st}${c.conf === "low" ? `<span class="pill warn">読み取りに自信なし</span>` : ""}${c.note ? `<span class="small muted">${esc(c.note)}</span>` : ""}</div></div>
-    ${done ? "" : `<label class="row" style="gap:6px;white-space:nowrap"><input type="checkbox" data-k="on"${(m.owned ? c.move : c.on) ? " checked" : ""}> ${label}</label>`}</li>`;
+  return st + (c.fixed ? `<span class="pill acc">直しました</span>` : c.conf === "low" ? `<span class="pill warn">読み取りに自信なし</span>` : "");
+}
+function phRow(c) {
+  const d = c.done ? " disabled" : "";
+  return `<li data-phc="${c.i}"><div class="grow"><div class="grid2"><label class="f">書名<input type="text" data-k="t" value="${esc(c.t)}"${d}></label><label class="f">著者<input type="text" data-k="a" value="${esc(c.a || "")}"${d}></label></div>
+    <div class="m"><label class="f" style="display:inline-flex;align-items:center;gap:4px">巻<input type="text" data-k="vol" value="${esc(c.vol ?? "")}" style="width:4.5em"${d}></label><span class="phst">${phStatus(c)}</span>${c.note && !c.done ? `<span class="small muted">${esc(c.note)}</span>` : ""}</div></div>
+    ${c.done ? "" : `<label class="row" style="gap:6px;white-space:nowrap"><input type="checkbox" data-k="on"${isOn(c) ? " checked" : ""}> <span class="phlbl">${c.m.owned ? "保管場所をこの棚にする" : "登録する"}</span></label>`}</li>`;
 }
 $("phReview").addEventListener("input", e => {
   const li = e.target.closest("[data-phc]"); if (!li || !PHC) return;
-  const c = PHC.items[+li.dataset.phc], k = e.target.dataset.k;
-  if (k === "on") { if (c.m.owned) c.move = e.target.checked; else c.on = e.target.checked; return; }
+  const c = PHC.items[+li.dataset.phc], k = e.target.dataset.k; if (!k || c.done) return;
+  if (k === "on") { if (c.m.owned) c.move = e.target.checked; else c.on = e.target.checked; phRegBtn(); return; }
   c[k] = k === "vol" ? (e.target.value.trim() === "" ? null : e.target.value.trim()) : e.target.value;
+  c.fixed = true;
 });
 $("phReview").addEventListener("change", e => {
   const li = e.target.closest("[data-phc]"); if (!li || !PHC || e.target.dataset.k === "on") return;
-  // 書名・著者・巻を直したら、蔵書との照合をやり直す
-  const c = PHC.items[+li.dataset.phc]; c.m = phMatch(c); li.outerHTML = phRow(c);
+  // 書名・著者・巻を直したら、蔵書との照合をやり直し、その本にチェックを付ける（行は作り直さない。チェックの操作が消えないように）
+  const c = PHC.items[+li.dataset.phc]; if (c.done) return;
+  c.m = phMatch(c);
+  if (c.m.owned) c.move = true; else c.on = true;
+  li.querySelector(".phst").innerHTML = phStatus(c);
+  li.querySelector(".phlbl").textContent = c.m.owned ? "保管場所をこの棚にする" : "登録する";
+  li.querySelector('[data-k="on"]').checked = true;
+  phRegBtn();
 });
 
 // 国立国会図書館で書名と著者から本を探し、ISBNが分かれば書誌を取る
@@ -160,7 +181,7 @@ async function ndlFind(t, a) {
 
 async function phRegister() {
   const b = PHC.batch, place = b.place;
-  const todo = PHC.items.filter(c => c.m.owned ? c.move : c.on);
+  const todo = PHC.items.filter(isOn);
   if (!todo.length) { UI.toast("チェックした本がありません"); return; }
   $("phReg").disabled = true;
   // 持っていない本は、先に書誌を探す（電波を使うので、書き込みの前に）
@@ -168,6 +189,7 @@ async function phRegister() {
   for (let i = 0; i < fresh.length; i++) { $("phRegMsg").textContent = `書誌を探しています（${i + 1}/${fresh.length}）…`; fresh[i].bib = await ndlFind(fresh[i].vol != null ? `${fresh[i].t} ${fresh[i].vol}` : fresh[i].t, fresh[i].a) || await ndlFind(fresh[i].t, fresh[i].a); }
   $("phRegMsg").textContent = "登録しています…";
   let moved = 0, added = 0, vols = 0;
+  const at = new Date().toISOString();
   Lib.batchBegin();
   try {
     for (const c of todo) {
@@ -175,6 +197,7 @@ async function phRegister() {
         const x = JSON.parse(JSON.stringify(Lib.get(c.m.item.id)));
         if (x.media === "ebook") { x.eloc = x.eloc || x.loc; x.media = "both"; }
         x.loc = place; Lib.put(x); moved++;
+        c.done = { at, how: "loc", id: x.id };
         continue;
       }
       const t = c.vol != null ? `${c.t} ${c.vol}` : c.t;
@@ -183,18 +206,28 @@ async function phRegister() {
       const bib = c.bib && (c.vol == null || /\d/.test(c.bib.t)) && (!c.cat || !bcat || bcat === c.cat) ? c.bib : null;
       const opt = { src: "photo", loc: place, media: "paper", seriesHint: c.vol != null, catHint: c.cat || undefined, bulk: true };
       const r = await Lib.register(bib ? { ...opt, isbn: bib.isbn, bib } : { ...opt, t, a: c.a, bib: { t, a: c.a } });
-      if (r.status === "vol") vols++; else if (r.status === "dup" || r.status === "voldup") moved++; else added++;
+      let how = "new";
+      if (r.status === "vol") { vols++; how = "vol"; } else if (r.status === "dup" || r.status === "voldup") { moved++; how = "loc"; } else added++;
       if ((r.status === "dup" || r.status === "voldup") && r.item.loc !== place && r.item.kind !== "series") { const x = JSON.parse(JSON.stringify(Lib.get(r.item.id))); x.loc = place; Lib.put(x); }
+      c.done = { at, how, id: r.item.id };
     }
-  } catch (e) { Lib.batchDiscard(); $("phRegMsg").textContent = "登録できませんでした：" + e.message; $("phReg").disabled = false; return; }
+  } catch (e) { Lib.batchDiscard(); for (const c of todo) if (c.done?.at === at) c.done = null; $("phRegMsg").textContent = "登録できませんでした：" + e.message; phRegBtn(); return; }
   Lib.batchCommit();
   const result = `新しく${added}冊・シリーズの巻${vols}冊・場所を入れた${moved}冊`;
-  const nb = { ...b, status: "done", doneAt: new Date().toISOString(), result };
+  // 直した書名・巻数と、登録済みの印を候補のファイルに残す（次に開いたときも直した内容で出る）
+  const keep = ["photo", "pos", "t", "a", "vol", "label", "cat", "conf", "note", "fixed", "added", "done"];
+  const cand = { ...PHC.cand, items: PHC.items.map(c => Object.fromEntries(keep.filter(k => c[k] !== undefined && c[k] !== null && c[k] !== false).map(k => [k, c[k]]))) };
+  const left = PHC.items.filter(c => !c.done).length;
+  const nb = { ...b, status: left ? "part" : "done", doneAt: at, result: [b.result, result].filter(Boolean).join("／") };
   delete nb.dir;
-  try { await Shelf.putRaw(`${PH.dir}/${b.dir}/batch.json`, b64ofText(JSON.stringify(nb)), `本棚の写真：${place} を登録`); } catch (e) { UI.toast("登録は済みましたが、写真の束に「登録済み」の印を付けられませんでした：" + e.message, 6000); }
-  $("phRegMsg").textContent = `登録しました：${result}。上の帯が「保存済み」になるまで開いたままにしてください。`;
-  $("phReg").remove();
-  phLoad(); render("photos");
+  try {
+    await Shelf.putRaw(`${PH.dir}/${b.dir}/candidates.json`, b64ofText(JSON.stringify(cand, null, 1)), `本棚の写真：${place} の候補を更新`);
+    await Shelf.putRaw(`${PH.dir}/${b.dir}/batch.json`, b64ofText(JSON.stringify(nb)), `本棚の写真：${place} を登録`);
+  } catch (e) { UI.toast("登録は済みましたが、写真の束に登録済みの印を付けられませんでした：" + e.message, 6000); }
+  $("phRegMsg").textContent = `登録しました：${result}。${left ? `残り${left}冊は、あとからでも登録できます。` : ""}上の帯が「保存済み」になるまで開いたままにしてください。`;
+  for (const c of todo) { const li = $("phReview").querySelector(`[data-phc="${c.i}"]`); if (li) li.outerHTML = phRow(c); }
+  phRegBtn();
+  await phLoad(); render("photos");
 }
 
 function renderPhotos() { phPlaces(); if (!PH.loaded) { PH.loaded = true; phLoad(); } }
