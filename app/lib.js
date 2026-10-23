@@ -117,7 +117,7 @@
     return toks(x).some(t => ny.includes(t)) || toks(y).some(t => nx.includes(t));
   }
   // 空いている項目だけを埋める。手で入れた値は上書きしない。購入の記録は経路ごとに足す
-  const FILL = ["a", "pub", "label", "tr", "y", "ccode", "fmt", "cover", "isbn", "asin", "mag", "loc"];
+  const FILL = ["a", "pub", "label", "tr", "y", "ccode", "fmt", "cover", "isbn", "asin", "mag", "loc", "sr", "sv"];
   L.absorb = (it, inp, base = {}) => {
     const x = clone(it); let changed = false;
     for (const k of FILL) { const v = base[k] ?? inp[k]; if (v != null && v !== "" && (x[k] == null || x[k] === "")) { x[k] = v; changed = true; } }
@@ -147,6 +147,147 @@
     const c = seriesCore(base); if (!c) return null;
     const hits = all.filter(it => seriesCore(it.t) === c);
     return hits.length === 1 ? hits[0] : null;
+  };
+
+  // ---------- 作品のシリーズ（副題が付いた巻：「ハリー・ポッターと賢者の石」「デルトラ・クエスト 5 恐怖の山」など） ----------
+  // 1冊ずつの記録に sr（シリーズ名）・sv（シリーズの中の順番。"1"・"2-3"・無ければ null）を持たせ、一覧ではまとめて見せる。
+  // 漫画のように巻だけで区別する本（kind:"series" の記録）とは別。1冊ずつの記録のままなので、チェッカーとの結び付き・読了・保管場所はそのまま
+  const SR_LABEL = /文庫|新書|選書|叢書|ノベルス|ノベルズ|コミックス|ブックス|books|ライブラリ|コレクション|セレクション|全集|講座|学術|スタディーズ|ドラゴンブック|KAGUYA|STAMP|フロンティア|BOOKS?$|ハヤカワ|創元|新潮|講談社|岩波|ちくま|中公|角川|光文社|幻冬舎|集英社|徳間|河出|平凡社|白水|みすず|青土|PHP|NHK|日経|ポプラ|偕成社|福音館|理論社|静山社|あすなろ|小学館|KADOKAWA|電撃|ガガガ|富士見|星海社|ブルーバックス|文学館|翻訳|単行本|Kindle|上下巻|クラシックス|名作|モダン|メチエ|ライト|Jコレ|^日本$|^PART$|^(上|中|下|前編|後編|完全版|新装版|新版|改訂版|新訳版?)$/i;
+  const ROMAN_RE = /^(X{0,3})(IX|IV|V?I{0,3})$/i;
+  const roman = r => { r = r.toUpperCase(); if (!r || !ROMAN_RE.test(r)) return null; const v = { I: 1, V: 5, X: 10 }; let n = 0; for (let i = 0; i < r.length; i++) { const c = v[r[i]], d = v[r[i + 1]] || 0; n += c < d ? -c : c; } return n || null; };
+  const KAN = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+  const volOf = v => {
+    if (v == null) return null; v = String(v).normalize("NFKC").trim().replace(/^第/, "").replace(/[巻幕部]$/, "");
+    if (/^\d{1,2}(-\d{1,3})?$/.test(v)) return v.replace(/^0+(?=\d)/, "");
+    const r = roman(v); if (r) return String(r);
+    if (/^[一二三四五六七八九十]+$/.test(v)) return String(v.length === 1 ? KAN[v] : v[0] === "十" ? 10 + (KAN[v[1]] || 0) : KAN[v[0]] * 10 + (KAN[v[2]] || 0));
+    return null;
+  };
+  const srClean = n => String(n || "").normalize("NFKC").replace(/\s*(Lesson|Vol\.?|No\.?|Part|PART|Book)\s*$/i, "").replace(/[\s・:：]*(シリーズ|外伝)$/, "").replace(/^[\s・:：\-―~〜]+|[\s・:：\-―~〜〈《「（(]+$/g, "").trim();
+  L.srKey = n => Biblio.norm(srClean(n));
+  const plainTitle = t => String(t || "").normalize("NFKC").replace(/\([^()]*(?:\([^()]*\)[^()]*)*\)/g, " ").replace(/\s+/g, " ").trim();
+  const okName = n => n.length >= 2 && !SR_LABEL.test(n) && !/^\d/.test(n) && !/全\d+巻/.test(n);
+  // 数だけの括弧「(6)」を順番とみなす
+  const parenVol = t => { const m = String(t || "").normalize("NFKC").match(/\(\s*(\d{1,2})\s*\)/); return m ? String(+m[1]) : null; };
+  // 書名や書誌から、シリーズ名と順番の候補を、確からしい順に挙げる（[{name, vol, how}]）。
+  // how：paren（書名の括弧の中のシリーズ名）・bib（国立国会図書館のシリーズ名）・num（書名の中の巻数）。
+  // 候補を挙げるだけで、本当にシリーズとみなすのは、同じ候補を持つ同じ著者の別の本があるときだけ（autoSeries）
+  const SC = new Map();
+  L.seriesCands = (t, bib) => {
+    if (!bib && SC.has(t)) return SC.get(t);
+    const r = seriesCands0(t, bib); if (!bib) { if (SC.size > 5000) SC.clear(); SC.set(t, r); } return r;
+  };
+  const seriesCands0 = (t, bib) => {
+    const s = String(t || "").normalize("NFKC"), out = [];
+    const add = (name, vol, how) => { name = srClean(name); if (okName(name) && !out.some(c => L.srKey(c.name) === L.srKey(name))) out.push({ name, vol, how }); else { const c = out.find(c => L.srKey(c.name) === L.srKey(name)); if (c && c.vol == null && vol != null) c.vol = vol; } };
+    // 書名の中の巻数：「テメレア戦記 4 象牙の帝国」「灼眼のシャナVI」「額の宝石 ルーンの杖秘録1」「デモナータ1幕 ロード・ロス」
+    const base = plainTitle(s);
+    const num = base.match(/^(.{2,}?[^\d\s])\s*(?:第)?(?:(\d{1,2})(?:巻|幕|部)?(?=$|[\s:：・\-―~〜〈《])|(?<=\s)(\d{1,2})(?=[^\x00-\x7F])(?![年世紀講月日時歳人回分冊章話号度代％%])|([IVX]{1,6})(?=$|[\s:：・\-―~〜]|[^\x00-\x7F]))/);
+    const numVol = num ? volOf(num[2] || num[3] || num[4]) : null;
+    // 括弧の中のシリーズ名：「(ハリー・ポッターシリーズ 1)」「(デルトラ・クエスト 2-3)」「(ゲド戦記 III)」。読み仮名の括弧（前に空白が無い）は除く
+    const parens = [...s.matchAll(/(\s|^)\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g)].map(m => m[2]).reverse();
+    for (const inner of parens) {
+      const m = inner.trim().match(/^(.*?)[\s・]*(第?\d{1,3}(?:-\d{1,3})?[巻幕部]?|[IVX]{1,6}|[一二三四五六七八九十]{1,3}|\?)?$/);
+      const name = m ? m[1] : inner;
+      let vol = volOf(m?.[2]);
+      if (vol == null && num && L.srKey(num[1]) === L.srKey(name)) vol = numVol;
+      add(name, vol, "paren");
+      const first = srClean(name).split(/\s+/)[0]; if (first !== srClean(name)) add(first, vol, "paren");
+    }
+    if (bib?.series) { const m = String(bib.series).normalize("NFKC").match(/^(.*?)[\s;；・]*(\d{1,3}|[IVX]{1,6})?$/); add(m ? m[1] : bib.series, volOf(m?.[2]) || volOf(bib.vol), "bib"); }
+    if (num) { add(num[1], numVol, "num"); const parts = srClean(num[1]).split(/\s+/); const last = parts[parts.length - 1]; if (parts.length > 1 && last.length >= 3 && /[^\x00-\x7F]/.test(last)) add(last, numVol, "num"); }
+    // 書名そのもの：「蛇行する川のほとり (1)」と「蛇行する川のほとり 2」のように、番号の付いた別の本と組になるときのため。順番は数だけの括弧から
+    else add(base.replace(/\s*[-―~〜].*[-―~〜]\s*$/, ""), parenVol(s), "title");
+    return out;
+  };
+  // 何度も使う書名の加工は覚えておく（まとめて登録するときに遅くならないように）
+  const memo = f => { const m = new Map(); return t => { if (m.has(t)) return m.get(t); if (m.size > 20000) m.clear(); const v = f(t); m.set(t, v); return v; }; };
+  const ptKey = memo(t => L.sameKey(plainTitle(t))), ptNorm = memo(t => Biblio.norm(plainTitle(t))), srKeyC = memo(n => L.srKey(n));
+  // シリーズの仲間（同じシリーズ名・著者が重なる本）
+  const sameAuthor = (a, b) => !a || !b || authorOverlap(a, b) || Biblio.norm(a) === Biblio.norm(b);
+  L.seriesMembers = (key, a, excludeId) => Object.values(L.items()).filter(it => it.sr && L.srKey(it.sr) === key && it.id !== excludeId && sameAuthor(a, it.a));
+  const commonHead = ts => { if (!ts.length) return ""; let p = ts[0]; for (const t of ts) { let i = 0; while (i < p.length && p[i] === t[i]) i++; p = p.slice(0, i); } return p; };
+  // シリーズを探すための索引（記録の一覧ごとに1度だけ作る）。cand：候補のシリーズ名→本・sr：付いているシリーズ名→本・to：「〇〇と」の始まり→本
+  const SRIX = new WeakMap();
+  const toHead = t => { const m = plainTitle(t).match(/^([^、,。\s]{4,}?)と./); return m ? m[1] : null; };
+  function srIndex() {
+    const items = L.items(); let ix = SRIX.get(items);
+    if (!ix) {
+      ix = { cand: new Map(), sr: new Map(), to: new Map() };
+      const add = (m, k, id) => { if (!m.has(k)) m.set(k, new Set()); m.get(k).add(id); };
+      for (const x of Object.values(items)) {
+        if (x.kind === "series" || x.st === "want") continue;
+        for (const c of L.seriesCands(x.t)) add(ix.cand, srKeyC(c.name), x.id);
+        if (x.sr) add(ix.sr, srKeyC(x.sr), x.id);
+        const h = toHead(x.t); if (h) add(ix.to, Biblio.norm(h), x.id);
+      }
+      SRIX.set(items, ix);
+    }
+    return ix;
+  }
+  // 1冊の記録にシリーズを付ける。同じシリーズ名と分かる同じ著者の別の本があるときだけ自動で付ける（1冊だけではシリーズにしない）。
+  // 「〇〇と××」のように書名の始まりだけが手がかりのときは、確認待ちで本人に聞く。付けたら true
+  L.autoSeries = (id, bib) => {
+    const it0 = L.get(id); if (!it0 || it0.kind === "series" || it0.sr || it0.st === "want") return false;
+    const ix = srIndex();
+    const no = new Set([].concat(it0.srNo || []));
+    const put = (x, name, vol) => {
+      const y = clone(L.get(x.id)); const old = y.sr; y.sr = name; if (vol != null) y.sv = vol; else delete y.sv; L.put(y);
+      const ix2 = srIndex(); if (old) ix2.sr.get(srKeyC(old))?.delete(y.id); const k = srKeyC(name); if (!ix2.sr.has(k)) ix2.sr.set(k, new Set()); ix2.sr.get(k).add(y.id);
+    };
+    const ok = x => x && x.id !== id && x.kind !== "series" && x.st !== "want" && sameAuthor(x.a, it0.a);
+    const pick = set => [...(set || [])].map(i => L.get(i)).filter(ok);
+    const myKey = ptKey(it0.t);
+    for (const c of L.seriesCands(it0.t, bib)) {
+      const key = srKeyC(c.name); if (no.has(key)) continue;
+      const mem = pick(ix.sr.get(key)).filter(x => x.sr && srKeyC(x.sr) === key);
+      if (mem.length) { put(it0, mem[0].sr, c.vol); return true; }
+      const peers = pick(ix.cand.get(key)).filter(x => !x.sr && ![].concat(x.srNo || []).includes(key))
+        .map(x => [x, L.seriesCands(x.t).find(d => srKeyC(d.name) === key)]).filter(([x, d]) => d && ptKey(x.t) !== myKey);
+      // 順番がみな同じ（「23講」のような数を巻と取り違えた、同じ本の別の記録など）ときはまとめない
+      if (peers.length && new Set([c.vol, ...peers.map(([, d]) => d.vol)].map(v => v ?? "-")).size >= 2) { for (const [x, d] of peers) put(x, c.name, d.vol); put(it0, c.name, c.vol); return true; }
+    }
+    // 手がかりが無いとき：すでにあるシリーズの仲間と書名の始まりが同じなら、そのシリーズに入れる（順番は同じ書名の仲間から）
+    const ptn = ptNorm(it0.t);
+    for (const [k, set] of ix.sr) {
+      if (no.has(k) || !set.size) continue;
+      const mem = pick(set).filter(x => x.sr && srKeyC(x.sr) === k); if (!mem.length) continue;
+      const head = Biblio.norm(commonHead(mem.map(x => plainTitle(x.t)))), nm = Biblio.norm(mem[0].sr);
+      if ((mem.length >= 2 && head.length >= 3 && ptn.startsWith(head)) || (nm.length >= 3 && ptn.startsWith(nm))) {
+        const bare = t => L.sameKey(plainTitle(t).replace(/\s*[(（]?(上下巻セット|上下巻|上|下)[)）]?\s*$/, ""));
+        const twin = mem.find(x => bare(x.t) === bare(it0.t) && x.sv);
+        put(it0, mem[0].sr, twin?.sv ?? parenVol(it0.t)); return true;
+      }
+    }
+    // 「〇〇と××」のように始まりが同じで、著者も同じ本がほかにもあるとき：シリーズかどうかは本人に聞く
+    const name = toHead(it0.t);
+    if (name && it0.a && !no.has(L.srKey(name))) {
+      const peers = pick(ix.to.get(Biblio.norm(name))).filter(x => x.a && !x.sr && ptKey(x.t) !== myKey);
+      if (peers.length && !Object.values(L.queue()).some(q => q.type === "series" && (q.target === id || (q.cands || []).includes(id)))) {
+        L.qAdd("series", id, { why: `「${name}と」で始まる同じ著者の本がほかにもあります。「${name}」のシリーズとしてまとめますか？`, name, cands: peers.map(x => x.id) });
+      }
+    }
+    return false;
+  };
+  // 確認待ち「シリーズかどうか」への答え。yes：対象と候補の本を同じシリーズにまとめる・no：もう聞かない
+  L.seriesAnswer = (q, yes) => {
+    const ids = [q.target, ...(q.cands || [])].filter(id => L.get(id));
+    const key = L.srKey(q.name);
+    for (const id of ids) {
+      const it = clone(L.get(id));
+      if (yes) { if (!it.sr) { it.sr = q.name; const d = L.seriesCands(it.t).find(c => c.vol != null); if (d && L.srKey(d.name) === key) it.sv = d.vol; } }
+      else it.srNo = [...new Set([].concat(it.srNo || [], key))];
+      L.put(it);
+    }
+    for (const [qid, x] of Object.entries(L.queue())) if (x.type === "series" && L.srKey(x.name) === key && ids.includes(x.target)) L.qDel(qid);
+  };
+  // シリーズを付ける・外す（本人の操作）。外したときは同じシリーズ名をもう聞かない
+  L.setSeries = (id, name, vol) => {
+    const it = clone(L.get(id)); if (!it) return;
+    const prev = it.sr;
+    if (name) { it.sr = srClean(name); if (vol != null && vol !== "") it.sv = String(vol); else delete it.sv; it.srNo = [].concat(it.srNo || []).filter(k => k !== L.srKey(name)); if (!it.srNo.length) delete it.srNo; }
+    else { delete it.sr; delete it.sv; if (prev) it.srNo = [...new Set([].concat(it.srNo || [], L.srKey(prev)))]; }
+    L.put(it);
   };
 
   // ---------- 必読書チェッカーの記録（読了・読みたい・所有） ----------
@@ -270,7 +411,7 @@
   //   issue：雑誌の号（"2026-08"）／vols：全巻セットなどで一度に持つ巻の番号の配列
   // out: {status:'new'|'dup'|'vol'|'voldup'|'alt'|'want', item, vol?, ed?, match?}
   // 同じ本は ISBN → ASIN → 書名と著者 の順で探し、見つかれば空いた項目だけ埋める（手で入れた値は上書きしない）
-  L.register = async (inp) => {
+  const registerCore = async (inp) => {
     const want = inp.st === "want";
     const bib = inp.bib || null;
     const hit = (inp.isbn && L.byIsbn(inp.isbn)) || (inp.asin && L.byAsin(inp.asin)) || null;
@@ -415,6 +556,13 @@
     return { status: want ? "want" : "new", item: it, match };
   };
 
+  // 登録のあとで、作品のシリーズ（副題つきの巻）を付ける。読みたい本・漫画のような巻だけのシリーズには付けない
+  L.register = async (inp) => {
+    const r = await registerCore(inp);
+    try { if (r?.item && r.item.kind !== "series" && r.item.st !== "want") L.autoSeries(r.item.id, inp.bib); } catch (e) { console.warn(e); }
+    return r;
+  };
+
   // 2つの記録を1つにまとめる（from の情報で into の空いた項目を埋め、from は消す）
   L.mergeInto = (into, from) => {
     const x = L.absorb(into, { ...from, buy: null, st: from.st }, from) || clone(into);
@@ -428,6 +576,7 @@
     if (blks.length) { if (!x.blk) x.blk = blks[0]; x.blks = blks.filter(b => b !== x.blk); if (!x.blks.length) delete x.blks; }
     if (keys.length) { if (!x.blkKey) x.blkKey = keys[0]; x.blkKeys = keys.filter(b => b !== x.blkKey); if (!x.blkKeys.length) delete x.blkKeys; }
     if (from.blkRead) x.blkRead = 1;
+    if (from.srNo) x.srNo = [...new Set([].concat(x.srNo || [], from.srNo))];
     if (from.blkCat && !x.blkCat) x.blkCat = from.blkCat;
     const r = L.reading()["b:" + from.id]; if (r && !L.reading()["b:" + x.id]) { L.setReading("b:" + x.id, r); }
     if (r) L.setReading("b:" + from.id, null);

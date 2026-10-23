@@ -124,6 +124,40 @@ const FIXES = [
       log.push(`前に「同じ本」と答えた本がもう一度確認待ちに出ていたので、まとめ直しました：${n}冊`);
     },
   },
+  // 2026-10-24：副題が付いた巻（「ハリー・ポッターと賢者の石」など）が、別々の本として扱われてシリーズになっていなかった。
+  // 書名・括弧のシリーズ名・巻数から、同じ著者で同じシリーズ名の本が2冊以上あるものをまとめる。
+  // 書名の始まりだけが同じもの（「〇〇と××」）は確認待ちで本人に聞く。順番が書名から分からない巻は、よく知られた順で補う
+  {
+    id: "2026-10-24-title-series",
+    async run(log) {
+      const books = Object.values(Lib.items()).filter(x => x.kind !== "series" && x.st !== "want").sort((a, b) => (a.added < b.added ? -1 : 1));
+      for (const it of books) Lib.autoSeries(it.id);
+      const ORDER = {
+        "ハリー・ポッター": [["賢者の石", 1], ["秘密の部屋", 2], ["アズカバン", 3], ["炎のゴブレット", 4], ["不死鳥の騎士団", 5], ["謎のプリンス", 6], ["死の秘宝", 7]],
+        "ゲド戦記": [["影との戦い", 1], ["こわれた腕環", 2], ["さいはての島へ", 3], ["帰還", 4], ["外伝", 5], ["アースシーの風", 6]],
+        "バーティミアス": [["サマルカンド", 1], ["ゴーレム", 2], ["プトレマイオス", 3]],
+        "デモナータ": [["ロード・ロス", 1], ["悪魔の盗人", 2], ["スローター", 3], ["ベック", 4], ["BEC", 4], ["血の呪い", 5], ["悪魔の黙示録", 6], ["死の影", 7]],
+        "サークル・オブ・マジック": [["魔法の学校", 1], ["邪悪の彫像", 2], ["ブレスランド", 3], ["魔法学校再訪", 4]],
+        "フォース・ウィング": [["戦姫", 1], ["鉄炎", 2]],
+        "筺底のエルピス": [["絶滅前線", 1]],
+        "佐々木とピーちゃん": [["スローライフ", 1]],
+        "屍竜戦記": [["", 1]],
+        "絶深海のソラリス": [["", 1]],
+        "変な家": [["", 1]],
+        "ルポ トランプ王国": [["", 1]],
+      };
+      let fixed = 0;
+      for (const it0 of Object.values(Lib.items())) {
+        if (!it0.sr || it0.sv) continue;
+        const rule = ORDER[it0.sr]; if (!rule) continue;
+        const hit = rule.find(([w]) => w ? it0.t.includes(w) : true); if (!hit) continue;
+        const it = JSON.parse(JSON.stringify(it0)); it.sv = String(hit[1]); Lib.put(it); fixed++;
+      }
+      const groups = new Set(Object.values(Lib.items()).filter(x => x.sr).map(x => Lib.srKey(x.sr)));
+      const asked = Object.values(Lib.queue()).filter(q => q.type === "series").length;
+      log.push(`副題が付いた本をシリーズにまとめました：${groups.size}シリーズ（順番を補った本 ${fixed}冊）${asked ? `。シリーズかどうか迷う ${asked}件は確認待ちに入れました` : ""}`);
+    },
+  },
 ];
 
 async function runFixes() {
