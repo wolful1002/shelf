@@ -138,9 +138,15 @@
     const k = Biblio.normTitle(title);
     return Object.values(L.items()).filter(it => Biblio.normTitle(it.t) === k);
   };
+  // 書誌の書名には「葬送のフリーレン = FRIEREN. VOL.」のように別の書き方が付くことがあるので、「=」から後ろと末尾の VOL. を除いても比べる
+  const seriesCore = t => Biblio.normTitle(String(t || "").normalize("NFKC").replace(/\s+=\s.*$/, "").replace(/[\s.]*vol\.?\s*$/i, ""));
   L.seriesFor = (base, pub) => {
-    const k = Biblio.normTitle(base);
-    return Object.values(L.items()).find(it => it.kind === "series" && Biblio.normTitle(it.t) === k && (!pub || !it.pub || it.pub === pub)) || null;
+    const k = Biblio.normTitle(base), all = Object.values(L.items()).filter(it => it.kind === "series" && (!pub || !it.pub || it.pub === pub));
+    const hit = all.find(it => Biblio.normTitle(it.t) === k);
+    if (hit) return hit;
+    const c = seriesCore(base); if (!c) return null;
+    const hits = all.filter(it => seriesCore(it.t) === c);
+    return hits.length === 1 ? hits[0] : null;
   };
 
   // ---------- 必読書チェッカーの記録（読了・読みたい・所有） ----------

@@ -83,13 +83,19 @@ async function photoUrl(path) {
 }
 // 候補が蔵書のどれに当たるか
 function phMatch(c) {
-  if (c.vol != null && c.vol !== "") {
+  const hasVol = c.vol != null && c.vol !== "";
+  // 種類が分かっている候補（漫画など）は、種類の違う本（同じ書名の小説など）とは結び付けない
+  const okCat = it => !c.cat || !it.cat || it.cat === "その他" || it.cat === c.cat;
+  if (hasVol) {
     const s = Lib.seriesFor(c.t);
-    if (s) { const v = (s.vols || {})[c.vol]; return { item: s, owned: s.st === "own" && !!v?.own, series: true }; }
+    if (s && okCat(s)) { const v = (s.vols || {})[c.vol]; return { item: s, owned: s.st === "own" && !!v?.own, series: true }; }
+    // 巻数のある漫画で、シリーズがまだ無い：新しいシリーズになる（1冊の本と書名だけで結び付けない）
+    if (c.cat === "漫画") return {};
   }
-  const f = Lib.findSameByTitle(c.t + (c.vol != null && c.vol !== "" ? " " + c.vol : ""), c.a) || Lib.findSameByTitle(c.t, c.a);
-  if (f?.item) return { item: f.item, owned: f.item.st === "own", want: f.item.st === "want" };
-  if (f?.cands) return { cands: f.cands };
+  // 巻数があるときは「書名＋巻数」でだけ探す（書名だけで探すと、別の巻や別の版の本に結び付いてしまう）
+  const f = Lib.findSameByTitle(hasVol ? c.t + " " + c.vol : c.t, c.a);
+  if (f?.item && okCat(f.item)) return { item: f.item, owned: f.item.st === "own", want: f.item.st === "want" };
+  if (f?.cands) { const cs = f.cands.filter(okCat); if (cs.length) return { cands: cs }; }
   return {};
 }
 let PHC = null;   // 開いている束：{ batch, items:[{...候補, on, move}] }
@@ -172,9 +178,11 @@ async function phRegister() {
         continue;
       }
       const t = c.vol != null ? `${c.t} ${c.vol}` : c.t;
-      const bib = c.bib && (c.vol == null || /\d/.test(c.bib.t)) ? c.bib : null;
-      const r = await Lib.register(bib ? { isbn: bib.isbn, bib, src: "photo", loc: place, media: "paper", seriesHint: c.vol != null }
-        : { t, a: c.a, bib: { t, a: c.a }, src: "photo", loc: place, media: "paper", seriesHint: c.vol != null });
+      // 見つかった書誌が別の種類（同じ書名の小説など）なら使わない
+      const bcat = c.bib ? Biblio.catFromC(c.bib.ccode || "") : null;
+      const bib = c.bib && (c.vol == null || /\d/.test(c.bib.t)) && (!c.cat || !bcat || bcat === c.cat) ? c.bib : null;
+      const opt = { src: "photo", loc: place, media: "paper", seriesHint: c.vol != null, catHint: c.cat || undefined, bulk: true };
+      const r = await Lib.register(bib ? { ...opt, isbn: bib.isbn, bib } : { ...opt, t, a: c.a, bib: { t, a: c.a } });
       if (r.status === "vol") vols++; else if (r.status === "dup" || r.status === "voldup") moved++; else added++;
       if ((r.status === "dup" || r.status === "voldup") && r.item.loc !== place && r.item.kind !== "series") { const x = JSON.parse(JSON.stringify(Lib.get(r.item.id))); x.loc = place; Lib.put(x); }
     }
