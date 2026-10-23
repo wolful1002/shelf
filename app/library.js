@@ -31,6 +31,7 @@ function render(t = location.hash.slice(1) || "register") {
   ready(); Shelf.on(Lib.P.novels, ready); Shelf.on(Lib.P.films, ready);
   Lib.reconcile();
   fixBooklogRead();
+  await runFixes();
   Shelf.on(Lib.P.novelDoc, (d, remote) => { if (remote) { Lib.reconcile(); render(); } });
   let t = null;
   Shelf.onAny((p, remote) => { if (remote && /records\//.test(p)) { clearTimeout(t); t = setTimeout(() => render(), 300); } });
@@ -613,8 +614,8 @@ const blRow = x => {
   return `<li class="${seen ? "seen" : ""}${on ? " sel" : ""}" data-blrow="${x.id}"><label class="row" style="gap:10px;align-items:flex-start;flex:1;min-width:0"><input type="checkbox" data-bl="${x.id}"${on ? " checked" : ""}><span style="min-width:0"><span class="t">${esc(x.t)}</span><br><span class="m">${esc(x.a)}・${esc(x.d)}${x.type ? "・" + esc(x.type) : ""}${x.g ? "・" + esc(x.g) : ""}${seen ? "・確認済み" : ""}</span></span></label>${seen ? `<button type="button" class="small quiet" data-blunseen="${x.id}">未確認に戻す</button>` : "<span></span>"}</li>`;
 };
 function renderBooklog() {
-  const done = new Set(Object.values(Lib.items()).map(it => it.blk).filter(Boolean));
-  const doneKey = new Set(Object.values(Lib.items()).map(it => it.blkKey).filter(Boolean));
+  const done = new Set(Object.values(Lib.items()).flatMap(it => [it.blk, ...(it.blks || [])]).filter(Boolean));
+  const doneKey = new Set(Object.values(Lib.items()).flatMap(it => [it.blkKey, ...(it.blkKeys || [])]).filter(Boolean));
   const seen = blSeen(), showSeen = $("blShowSeen").checked;
   const q = Biblio.norm($("blq").value);
   const all = booklogItems().filter(x => !done.has(x.id) && !doneKey.has(blKey(x)));

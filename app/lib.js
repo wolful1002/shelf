@@ -308,10 +308,12 @@
 
     // 巻数があればシリーズにまとめる（漫画のほか、巻数で出る本も）。版違い（モノクロ版など）は同じシリーズの中で版ごとに分ける
     const se = L.splitEd(t);
-    const sv = Biblio.splitVolume(se.base, bib?.vol);
+    // 書誌の「巻」は、新書・文庫のレーベルの通し番号（中公新書 1996 など）のことが多い。漫画で小さな数のときだけ巻として使う
+    const bvol = /^\d+$/.test(String(bib?.vol || "").normalize("NFKC")) ? +String(bib.vol).normalize("NFKC") : null;
+    const sv = Biblio.splitVolume(se.base, cat === "漫画" && bvol != null && bvol <= 150 ? bvol : null);
     sv.base = String(sv.base || "").replace(/[\s:：\-－―~〜・,、]+$/, "");
     const vlist = inp.vols?.length ? inp.vols : (sv.vol != null ? [sv.vol] : null);
-    if (!want && t && vlist && sv.base && (cat === "漫画" || inp.vols?.length || inp.seriesHint || /^\d+$/.test(String(bib?.vol || "").normalize("NFKC")))) {
+    if (!want && t && vlist && sv.base && (cat === "漫画" || inp.vols?.length || inp.seriesHint)) {
       const found = L.seriesFor(sv.base, base.pub);
       const s = found ? clone(found) : { id: L.newId("s"), kind: "series", t: sv.base, ...base, vols: {} };
       if (!found) { delete s.buy; delete s.note; }
