@@ -276,7 +276,7 @@
         v.own = 1; if (inp.isbn && !v.isbn) v.isbn = inp.isbn; if (inp.asin && !v.asin) v.asin = inp.asin;
         if (inp.media && v.media && v.media !== inp.media) v.media = "both"; else if (inp.media && !v.media) v.media = inp.media;
       }
-      if (x) L.put(x);
+      if (x) { L.put(x); if (x.nk && x.st === "own" && hit.item.st !== "own") { L.setOwn(x.nk, true); L.qDelFor(x.id); } }
       return { status: hit.vol != null ? "voldup" : "dup", item: x || hit.item, vol: hit.vol, ed: hit.ed, filled: !!x };
     }
     if (inp.mag && !inp.issue) { const h = L.byMag(inp.mag, inp.magMonth); if (h) { const x = L.absorb(h, inp); if (x) L.put(x); return { status: "dup", item: x || h }; } }
@@ -428,19 +428,43 @@
     const c = Biblio.classify(code);
     if (c.kind === "isbn") {
       const hit = L.byIsbn(c.code);
+      // 読みたい（未所持）の本は「持っていない」として、読みたいに入っていることを添える
+      if (hit && hit.item.st === "want") { const bib = await Biblio.lookup(c.code); return { owned: false, c, bib, wantItem: hit.item, ...extras(bib) }; }
       if (hit) return { owned: true, c, ...hit };
       const bib = await Biblio.lookup(c.code);
-      const sameTitle = bib ? L.byTitle(bib.t).filter(x => x.st === "own") : [];
-      const sv = bib ? Biblio.splitVolume(bib.t, bib.vol) : null;
-      const series = sv && sv.vol != null ? L.seriesFor(sv.base) : null;
-      const m = bib ? Biblio.matchNovel(bib.t, bib.a) : null;
-      const work = m?.status === "auto" ? m.work : null;
-      const films = bib ? Biblio.filmsByTitle(bib.t) : [];
-      return { owned: false, c, bib, sameTitle, series, vol: sv?.vol, work, workRead: work ? !!L.ndoc().read[work.k] : false, films };
+      if (bib) {
+        // ISBNの無い記録（Kindle・ブクログ・購入履歴など）も、書名と著者で同じ本なら「持っている」とする
+        const f = L.findSameByTitle(bib.t, bib.a);
+        if (f?.item && f.item.st === "own") return { owned: true, c, item: f.item, byTitle: true };
+        // シリーズの巻（電子で持っている巻など）
+        const ex = extras(bib);
+        if (ex.series && ex.vol != null) {
+          const m = ex.ed ? ex.series.eds?.[ex.ed]?.vols : ex.series.vols;
+          if (m?.[ex.vol]?.own) return { owned: true, c, item: ex.series, vol: ex.vol, ed: ex.ed, byTitle: true };
+        }
+        if (f?.item && f.item.st === "want") return { owned: false, c, bib, wantItem: f.item, ...ex };
+        return { owned: false, c, bib, ...ex };
+      }
+      return { owned: false, c, bib: null };
     }
     if (c.kind === "magazine") { const hit = L.byMag(c.mag, c.month); return { owned: !!hit, c, item: hit }; }
     return { owned: false, c };
   };
+  // 持っていない本について、所持確認の画面に添える情報
+  function extras(bib) {
+    if (!bib) return {};
+    const sameTitle = L.byTitle(bib.t).filter(x => x.st === "own");
+    const cat = Biblio.catFromC(bib.ccode);
+    const bvol = /^\d+$/.test(String(bib.vol || "").normalize("NFKC")) ? +String(bib.vol).normalize("NFKC") : null;
+    const se = L.splitEd(bib.t);
+    const sv = Biblio.splitVolume(se.base, cat === "漫画" && bvol != null && bvol <= 150 ? bvol : null);
+    const series = sv.vol != null ? L.seriesFor(sv.base) : null;
+    const m = Biblio.matchNovel(bib.t, bib.a);
+    const work = m?.status === "auto" ? m.work : null;
+    const films = Biblio.filmsByTitle(bib.t);
+    return { sameTitle, series, vol: sv.vol, ed: se.ed, work, workRead: work ? !!L.ndoc().read[work.k] : false, films };
+  }
+
 
   window.Lib = L;
 })();

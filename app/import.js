@@ -220,6 +220,7 @@ $("yesBtn").onclick = async () => {
   Lib.batchBegin();
   try { await runAll(PLAN.rows); } catch (e) { Lib.batchDiscard(); setMsg("登録できませんでした：" + e.message); return; }
   const n = Lib.batchCommit();
+  const st = JSON.parse(JSON.stringify(Lib.settings())); st.imports = { ...(st.imports || {}), [DIR]: new Date().toISOString() }; Shelf.writeDoc(Lib.P.settings, st);
   setMsg(`登録しました（${n}個のファイルを送っています。上の「保存済み」を確かめてください）。控えは backup/${stamp}/ にあります。`);
   $("doneLinks").hidden = false;
 };
@@ -228,6 +229,9 @@ $("yesBtn").onclick = async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); return; }
   await Shelf.init();
   const n = Shelf.read(Lib.P.novels); if (n) Biblio.setNovels(n);
+  // 一度登録した取り込みは、二重に登録しないよう、もう案を作らない
+  const doneAt = Lib.settings().imports?.[DIR];
+  if (doneAt) { setMsg(`この取り込みは ${doneAt.slice(0, 10)} に登録済みです。もう一度登録する必要はありません。`); return; }
   Lib.reconcile();
   try { await load(); } catch (e) { setMsg("読み込めませんでした：" + e.message); }
 })();

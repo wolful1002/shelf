@@ -141,6 +141,14 @@
     let m = t.match(/^(.*?)[\s　]*(?:\(|（)?\s*(?:第)?(\d{1,3})(?:巻)?\s*(?:\)|）)?$/);
     let vol = volField && /^\d+$/.test(String(volField).normalize("NFKC")) ? +String(volField).normalize("NFKC") : null;
     if (m && m[1] && m[1].length >= 1 && /\d/.test(m[2])) return { base: m[1].trim(), vol: vol ?? +m[2] };
+    // 巻数のあとに副題が続く形：「史記 9 李陵 下」「天体戦士サンレッド 20巻 …」「おきらく忍伝ハンゾー 第弐巻」「この子知りませんか?(上): …」
+    const KAN = { 一: 1, 壱: 1, 二: 2, 弐: 2, 三: 3, 参: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+    m = t.match(/^(.{2,}?)\s*\((上|中|下)\)\s*(?:[:：].*)?$/);
+    if (m) return { base: m[1].trim(), vol: vol ?? { 上: 1, 中: 2, 下: 3 }[m[2]] };
+    m = t.match(/^(.{2,}?)\s+第([一二三四五六七八九十壱弐参])巻(?:\s.*)?$/);
+    if (m) return { base: m[1].trim(), vol: vol ?? KAN[m[2]] };
+    m = t.match(/^(.{2,}?)\s+第?(\d{1,3})巻(?:\s.*)?$/) || t.match(/^(.{2,}?)\s+(\d{1,3})\s+\S.*$/);
+    if (m && +m[2] <= 300) return { base: m[1].trim(), vol: vol ?? +m[2] };
     if (vol != null) return { base: t, vol };
     return { base: t, vol: null };
   };

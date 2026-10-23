@@ -402,6 +402,18 @@ function rowHTML(b){
     ${openKey===b.k ? detailHTML(b) : ""}
   </li>`;
 }
+// 蔵書との連携：この作品に結び付いた蔵書の記録（版・保管場所）
+function libOf(k){
+  const out = [];
+  for(const h of "0123456789abcdef"){ const d = window.Shelf && Shelf.read("records/library/" + h + ".json"); if(d && d.items) for(const it of Object.values(d.items)) if(it.nk === k && it.st === "own") out.push(it) }
+  return out;
+}
+function libHTML(b){
+  const its = libOf(b.k); if(!its.length) return "";
+  const md = m => m === "ebook" ? "電子" : m === "both" ? "紙と電子" : "紙";
+  const one = (x, extra) => [x.pub, x.label, x.fmt, x.isbn, md(x.media)].filter(Boolean).join("・") + (extra ? "" : "");
+  return `<div style="font-size:13px;color:var(--muted)">蔵書 <span style="color:var(--ink)">${its.map(it => `${esc(one(it))}${it.loc ? "　保管場所：" + esc(it.loc) : ""}${(it.alt||[]).map(a => `／別の版：${esc([a.pub, a.fmt, a.isbn, md(a.media)].filter(Boolean).join("・"))}${a.loc ? "（" + esc(a.loc) + "）" : ""}`).join("")}`).join("<br>")}</span>　<a href="library.html#list">蔵書を開く</a></div>`;
+}
 function detailHTML(b){
   const grp = g => ORDER.filter(k=>L[k].kind!=="genre"===(g==="l") && elig(b,k)).map(k=>{
     const on = k in b.s;
@@ -418,6 +430,7 @@ function detailHTML(b){
       <span class="lb">もう一度読んだ</span><span><input type="date" class="addRead dt" max="${today()}" aria-label="もう一度読んだ日を足す"> <span class="mm">日付を選ぶと再読として足します</span></span></div>` : "";
   return `<div class="det">
     ${rdHTML}
+    ${libHTML(b)}
     <div style="font-size:13px;color:var(--muted)">原題 <span style="color:var(--ink)">${esc(b.o)}</span>${b.ty==="S"?"　・短編集":""}</div>
     ${b.tr===2 && b.jp ? `<div style="font-size:13px;color:var(--muted)">主な刊行 <span style="color:var(--ink)">初刊 ${esc(b.jp)}${b.jy?`（${b.jy}年）`:""}${b.jb?`　現在の主な版 ${esc(b.jb)}`:""}</span>${b.jv ? `<span class="tagm">Webで確認済み${b.jvd ? "（" + b.jvd + "）" : ""}</span>` : ""}${b.js ? `　<a href="${esc(b.js)}" target="_blank" rel="noopener">出典</a>` : ""}　<a href="https://ndlsearch.ndl.go.jp/search?cs=bib&keyword=${encodeURIComponent(b.t+" "+b.a)}" target="_blank" rel="noopener">国立国会図書館で版を確かめる</a></div>` : ""}
     ${b.tr===1 ? `<div style="font-size:13px;color:var(--muted)">主な邦訳 <span style="color:var(--ink)">${b.jp ? esc(b.jp) + (b.jy ? `（${b.jy}年）` : "") : "未確認"}</span>${b.jv ? `<span class="tagm">Webで確認済み${b.jvd ? "（" + b.jvd + "）" : ""}</span>` : ""}${b.js ? `　<a href="${esc(b.js)}" target="_blank" rel="noopener">出典</a>` : ""}${b.jn ? `<div style="font-size:12px;margin-top:2px">${esc(b.jn)}</div>` : ""}　<a href="https://ndlsearch.ndl.go.jp/search?cs=bib&keyword=${encodeURIComponent(b.t+" "+b.a)}" target="_blank" rel="noopener">国立国会図書館で版を確かめる</a></div>` : ""}

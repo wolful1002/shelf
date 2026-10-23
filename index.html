@@ -10,8 +10,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app/ui.css?v=202610231335">
-<link rel="stylesheet" href="app/bar.css?v=202610231335">
+<link rel="stylesheet" href="app/ui.css?v=202610231407">
+<link rel="stylesheet" href="app/bar.css?v=202610231407">
 </head>
 <body>
 <main class="wrap" id="main">
@@ -62,11 +62,11 @@
 </main>
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
-<script src="app/store.js?v=202610231335"></script>
-<script src="app/biblio.js?v=202610231335"></script>
-<script src="app/scan.js?v=202610231335"></script>
-<script src="app/ui.js?v=202610231335"></script>
-<script src="app/lib.js?v=202610231335"></script>
+<script src="app/store.js?v=202610231407"></script>
+<script src="app/biblio.js?v=202610231407"></script>
+<script src="app/scan.js?v=202610231407"></script>
+<script src="app/ui.js?v=202610231407"></script>
+<script src="app/lib.js?v=202610231407"></script>
 <script>
 "use strict";
 const { $, esc } = UI;
@@ -106,7 +106,8 @@ $("tmdbSave").onclick = async () => {
   Shelf.onStatus(() => renderNotices());
 })();
 
-const QNAME = { link: "チェッカーとの結び付け", cat: "本の種類", bib: "書誌が見つからない本", check: "書誌の確認", unowned: "所有を外した本" };
+const QNAME = { link: "チェッカーとの結び付け", cat: "本の種類", bib: "書誌が見つからない本", check: "書誌の確認", unowned: "所有を外した本", same: "同じ本かどうか", dupbuy: "2回以上買った本", read: "読了の候補" };
+const mediaName = m => m === "ebook" ? "電子" : m === "both" ? "紙と電子" : "紙";
 function renderNotices() {
   const q = Object.values(Lib.queue());
   const by = {}; q.forEach(x => by[x.type] = (by[x.type] || 0) + 1);
@@ -145,19 +146,23 @@ async function onCode(code) {
   if (r.owned) {
     Scan.beep("dup");
     const it = r.item;
-    const vol = r.vol != null ? `${r.vol}巻` : "";
-    const read = r.vol != null ? (it.vols?.[r.vol]?.read ? "読了" : "未読") : (Lib.isRead(it) ? "読了" : "未読");
+    const vm = r.vol != null ? (r.ed ? it.eds?.[r.ed]?.vols : it.vols) : null;
+    const vol = r.vol != null ? `${r.ed ? r.ed + " " : ""}${r.vol}巻` : "";
+    const read = vm ? (vm[r.vol]?.read ? "読了" : "未読") : (Lib.isRead(it) ? "読了" : "未読");
+    const media = vm?.[r.vol]?.media || it.media;
     show(`<div class="result own"><div class="big">持っています</div><p><b>${esc(it.t)}</b> ${esc(vol)}</p>
-      <p class="small">${esc(it.loc || "保管場所は未設定")}・${esc(it.media === "ebook" ? "電子" : "紙")}・${read}${it.st !== "own" ? `・<span class="pill warn">${it.st === "gone" ? "手放した" : "所有を外した"}</span>` : ""}</p></div>`);
+      <p class="small">${esc(it.loc || "保管場所は未設定")}・${esc(mediaName(media))}・${read}${it.st !== "own" ? `・<span class="pill warn">${it.st === "gone" ? "手放した" : "所有を外した"}</span>` : ""}${r.byTitle ? `・<span class="small muted">書名で照合</span>` : ""}</p></div>`);
     return;
   }
   Scan.beep("ok");
   if (c.kind === "magazine") { show(`<div class="result none"><div class="big">持っていません</div><p>雑誌コード ${esc(c.mag)}・${c.month}月号</p></div>`); return; }
   const b = r.bib;
   const extra = [];
+  if (r.wantItem) extra.push(`<p><span class="pill acc">読みたい（未所持）</span> 読みたい本に入っています${r.wantItem.wl ? `（${esc(r.wantItem.wl)}）` : ""}</p>`);
   if (r.series) {
-    const owned = Object.entries(r.series.vols || {}).filter(([, v]) => v.own).map(([n]) => +n).sort((a, b) => a - b);
-    extra.push(`<p>シリーズ『${esc(r.series.t)}』は ${owned.length}冊所持（${esc(rangeText(owned))}）。この${r.vol}巻は持っていません。</p>`);
+    const vm = (r.ed ? r.series.eds?.[r.ed]?.vols : r.series.vols) || {};
+    const owned = Object.entries(vm).filter(([, v]) => v.own).map(([n]) => +n).sort((a, b) => a - b);
+    extra.push(`<p>シリーズ『${esc(r.series.t)}』${r.ed ? `（${esc(r.ed)}）` : ""}は ${owned.length}冊所持（${esc(rangeText(owned))}）。この${r.vol}巻は持っていません。</p>`);
   }
   if (r.sameTitle?.length) extra.push(`<p><span class="pill warn">同じ書名の本を所持</span> 別の版かもしれません（${esc(r.sameTitle.map(x => x.pub || x.fmt || "版不明").join("、"))}）</p>`);
   if (r.work) extra.push(`<p><span class="pill acc">必読書</span> ${esc(Biblio.tierNm(r.work.sc))}（スコア${Math.round(r.work.sc)}）${r.workRead ? "・読了済み" : ""}</p>`);
@@ -168,7 +173,7 @@ async function onCode(code) {
     <div class="row"><button type="button" id="regNow">この本を登録する</button></div></div>`);
   $("regNow").onclick = async () => {
     const res = await Lib.register({ isbn: c.code, bib: b, src: "camera" });
-    UI.toast(res.status === "vol" ? `『${res.item.t}』${res.vol}巻を登録しました` : `『${res.item.t}』を登録しました`);
+    UI.toast(res.status === "vol" ? `『${res.item.t}』${res.vol}巻を登録しました` : res.status === "dup" ? `『${res.item.t}』を所有にしました` : `『${res.item.t}』を登録しました`);
     $("regNow").disabled = true; $("regNow").textContent = "登録しました";
   };
 }

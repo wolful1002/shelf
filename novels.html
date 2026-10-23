@@ -247,7 +247,7 @@ button.when{font:inherit;font-size:12px;background:none;border:0;padding:0;color
 .mylist .src span.acts2{display:flex;gap:6px}
 @media (prefers-reduced-motion:reduce){.bar i{transition:none}}
 </style><style>[hidden]{display:none!important}</style>
-<link rel="stylesheet" href="app/bar.css?v=202610231335">
+<link rel="stylesheet" href="app/bar.css?v=202610231407">
 <div id="shelfBar" class="shelfbar"><div class="sb-in"><a class="sb-brand" href="index.html">shelf</a><nav aria-label="画面"><a href="index.html">ホーム</a><a href="library.html">蔵書</a><a href="novels.html" aria-current="page">必読書</a><a href="films.html">映画</a></nav><span id="shelfSync" class="sb-sync" role="status">…</span></div></div>
 <p id="shelfMsg" class="shelfmsg" hidden></p>
 
@@ -430,18 +430,18 @@ button.when{font:inherit;font-size:12px;background:none;border:0;padding:0;color
 
 
 
-<script src="app/store.js?v=202610231335"></script>
+<script src="app/store.js?v=202610231407"></script>
 <script>
 "use strict";
 (async () => {
-  const CFG = {"title": "必読書チェッカー — shelf", "works": "works/novels.json", "need": ["works/novels.json", "works/novels-biblio.json", "records/novels-checker/"], "docs": {"books": "records/novels-checker/books.json", "custom": "records/novels-checker/custom.json", "log": "records/novels-checker/log.json"}, "logchunks": "records/novels-checker/log-{n}.json", "code": "app/legacy-novels.js?v=202610231335"};
+  const CFG = {"title": "必読書チェッカー — shelf", "works": "works/novels.json", "need": ["works/novels.json", "works/novels-biblio.json", "records/novels-checker/", "records/library/"], "docs": {"books": "records/novels-checker/books.json", "custom": "records/novels-checker/custom.json", "log": "records/novels-checker/log.json"}, "logchunks": "records/novels-checker/log-{n}.json", "code": "app/legacy-novels.js?v=202610231407"};
   const bar = document.getElementById("shelfBar");
   const msg = t => { const el = document.getElementById("shelfMsg"); if (el) { el.textContent = t; el.hidden = !t; } };
   // 保存の状態
   const pill = document.getElementById("shelfSync");
   Shelf.onStatus(s => {
     const m = { ok: "保存済み", idle: "準備中", syncing: s.msg || "通信中", pending: `送信待ち ${s.pending}件`, offline: s.pending ? `電波なし・送信待ち ${s.pending}件` : "電波なし", error: "保存できていません", notoken: "鍵が未設定" };
-    pill.textContent = m[s.state] || s.state; pill.dataset.state = s.state; pill.title = s.msg || "";
+    pill.textContent = (m[s.state] || s.state) + (s.state === "error" && s.msg ? "：" + s.msg : ""); pill.dataset.state = s.state; pill.title = s.msg || "";
   });
   if (!Shelf.token()) { msg("鍵が設定されていません。ホームで鍵を入れてください。"); return; }
   msg("記録を読み込んでいます…");
