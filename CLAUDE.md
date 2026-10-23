@@ -21,7 +21,8 @@
 
 ## 「本棚の写真を読んで」と頼まれたら
 
-1. `shelf-data` を取り込み、`inbox/shelf/*/batch.json` のうち `status` が `"new"` の束を探す。
+1. `shelf-data` の **`photos` の枝**（写真だけの置き場。記録の `main` とは別）を取り込み、`inbox/shelf/*/batch.json` のうち `status` が `"new"` の束を探す。
 2. 束の写真（`1.jpg`…）を1枚ずつ見て、背表紙の書名・著者・巻数を読み取る。棚の左から右、上から下の順に並べる。
 3. 同じフォルダに `candidates.json` を書く：`{"readAt": "<日時>", "items": [{"photo": "1.jpg", "pos": 1, "t": "書名", "a": "著者", "vol": "3" または null, "label": "レーベル", "cat": "漫画"（種類が分かれば。同じ書名の小説などと取り違えないため）, "conf": "high" | "low", "note": "迷った点"}]}`。読み切れない・自信のない背表紙は `conf: "low"` にして残す（本人が画面で決める。Claude が勝手に消したり確定したりしない）。
-4. `batch.json` の `status` を `"read"` にして送る。蔵書の記録（records/）には触れない。登録は本人がアプリの「本棚の写真」で確かめてから行う。
+4. `batch.json` の `status` を `"read"` にして、`photos` の枝に送る。蔵書の記録（records/）には触れない。登録は本人がアプリの「本棚の写真」で確かめてから行う。
+5. 写真の置き場が 600MB を超えると、アプリが確認の終わった棚（`status` が `"done"`）の写真だけを消す（`photos` の枝を作り直す。本人の了解は要らない・2026-10-24 本人の指示）。読み取り待ち・確認途中の写真は消さない。`photos` の枝は作り直されるので、取り込むときは `git fetch origin photos` のあと `git reset --hard origin/photos` で合わせる。

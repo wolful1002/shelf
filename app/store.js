@@ -323,34 +323,63 @@
     },
     refresh,
     flush,
-    // 写真などのファイルをそのまま保管場所に置く（base64：中身を base64 にした文字列）。送信待ちには入れず、その場で送る
-    async putRaw(path, base64, message) {
+    // 写真などのファイルをそのまま保管場所に置く（base64：中身を base64 にした文字列）。送信待ちには入れず、その場で送る。
+    // branch を渡すと、その枝（例：写真だけを置く "photos"）に置く
+    async putRaw(path, base64, message, branch = BRANCH) {
       let sha = null;
       for (let attempt = 1; attempt <= 4; attempt++) {
         const res = await gh(`/contents/${encodeURI(path)}`, { method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: message || `アプリから追加：${path}`, branch: BRANCH, content: base64, sha: sha || undefined }) });
+          body: JSON.stringify({ message: message || `アプリから追加：${path}`, branch, content: base64, sha: sha || undefined }) });
         if (res.ok) return (await res.json()).content.sha;
-        if ((res.status === 409 || res.status === 422) && attempt < 4) { sha = await currentSha(path); continue; }
+        if ((res.status === 409 || res.status === 422) && attempt < 4) {
+          if (branch === BRANCH) sha = await currentSha(path);
+          else { const r = await gh(`/contents/${encodeURI(path)}?ref=${branch}`); sha = r.ok ? (await r.json()).sha : null; }
+          continue;
+        }
         let why = ""; try { why = (await res.json()).message || ""; } catch {}
         throw new Error(`送れませんでした（${res.status}${why ? "：" + why : ""}）`);
       }
     },
     // 保管場所のフォルダの中身（名前と種類）。無ければ []
-    async listRemote(dir) {
-      const res = await gh(`/contents/${encodeURI(dir)}?ref=${BRANCH}`);
+    async listRemote(dir, branch = BRANCH) {
+      const res = await gh(`/contents/${encodeURI(dir)}?ref=${branch}`);
       if (res.status === 404) return [];
       if (!res.ok) throw new Error("一覧を取れませんでした（" + res.status + "）");
       return (await res.json()).map(x => ({ name: x.name, type: x.type, path: x.path, size: x.size }));
     },
     // 写真などをそのまま読む（Blob）
-    async readRemoteBlob(path) {
-      const res = await gh(`/contents/${encodeURI(path)}?ref=${BRANCH}`, { headers: { Accept: "application/vnd.github.raw+json" } });
+    async readRemoteBlob(path, branch = BRANCH) {
+      const res = await gh(`/contents/${encodeURI(path)}?ref=${branch}`, { headers: { Accept: "application/vnd.github.raw+json" } });
       if (!res.ok) throw new Error("ファイルを取れませんでした（" + res.status + "）");
       return await res.blob();
     },
+    // 枝の中身を一覧する（[{path, sha, size}]）。枝が無ければ null
+    async branchFiles(branch) {
+      const res = await gh(`/git/trees/${branch}?recursive=1`);
+      if (res.status === 404 || res.status === 409) return null;
+      if (!res.ok) throw new Error("一覧を取れませんでした（" + res.status + "）");
+      const j = await res.json();
+      return j.tree.filter(e => e.type === "blob").map(e => ({ path: e.path, sha: e.sha, size: e.size || 0 }));
+    },
+    // 枝を、keep で選んだファイルだけを持つ新しい1つの版に置き換える（それまでの版は残さない）。
+    // 写真の枝の古い写真を本当に消して、保管場所の大きさを減らすために使う。記録の枝（main）には使わない
+    async branchReplace(branch, keep, message) {
+      if (branch === BRANCH) throw new Error("記録の枝は置き換えられません");
+      const files = await this.branchFiles(branch); if (!files) return 0;
+      const kept = files.filter(keep);
+      if (kept.length === files.length) return 0;
+      const tree = kept.length ? kept.map(f => ({ path: f.path, mode: "100644", type: "blob", sha: f.sha }))
+        : [{ path: "README.md", mode: "100644", type: "blob", content: "本棚の写真の置き場です。\n" }];
+      const json = (url, body, method = "POST") => gh(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+        .then(async r => { if (!r.ok) throw new Error("写真の片付けに失敗しました（" + r.status + "）"); return r.json(); });
+      const t = await json(`/git/trees`, { tree });
+      const c = await json(`/git/commits`, { message, tree: t.sha, parents: [] });
+      await json(`/git/refs/heads/${branch}`, { sha: c.sha, force: true }, "PATCH");
+      return files.length - kept.length;
+    },
     // 端末に写しを持たないファイル（import/ など）を、その場で保管場所から読む。無ければ null
-    async readRemote(path) {
-      const res = await gh(`/contents/${encodeURI(path)}?ref=${BRANCH}`, { headers: { Accept: "application/vnd.github.raw+json" } });
+    async readRemote(path, branch = BRANCH) {
+      const res = await gh(`/contents/${encodeURI(path)}?ref=${branch}`, { headers: { Accept: "application/vnd.github.raw+json" } });
       if (res.status === 404) return null;
       if (!res.ok) throw new Error("ファイルを取れませんでした（" + res.status + "）");
       return JSON.parse(await res.text());

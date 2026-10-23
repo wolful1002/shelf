@@ -3,6 +3,10 @@
 // 2. Claude が会話で写真を読み、背表紙の書名・著者を candidates.json に書く（「本棚の写真を読んで」と頼む）
 // 3. この画面で候補を確かめ、まとめて登録する。持っている本は保管場所をその棚にし、持っていない本は新しく登録する
 "use strict";
+// 写真は記録とは別の枝「photos」に置く（確認が終わった写真を、記録の歴史を書き換えずに本当に消せるように）
+const PB = "photos";
+// 写真の置き場がこの大きさを超えたら、確認が終わった棚の写真を消す（GitHub が勧める保管場所の大きさ 1GB を超えないように）
+const PHOTO_LIMIT = 600e6;
 const PH = { dir: "inbox/shelf", files: [], batches: [], open: null, urls: new Map() };
 const bufOfBlob = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(blob); });
 const b64ofBuf = buf => { const b = new Uint8Array(buf); let x = ""; for (let i = 0; i < b.length; i += 0x8000) x += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(x); };
@@ -133,11 +137,11 @@ async function phUpload() {
       try {
         for (let i = x.sent; i < x.n; i++) {
           const buf = await HELD.pic(x.id, i); if (!buf) throw new Error(`${i + 1}枚目の写真が端末に見つかりません`);
-          await Shelf.putRaw(`${base}/${i + 1}.jpg`, b64ofBuf(buf), `本棚の写真：${x.place}（${i + 1}枚目）`);
+          await Shelf.putRaw(`${base}/${i + 1}.jpg`, b64ofBuf(buf), `本棚の写真：${x.place}（${i + 1}枚目）`, PB);
           x.sent = i + 1; await HELD.put(x); phHeldShow();
         }
         const batch = { id: x.id, place: x.place, at: x.at, device: Shelf.deviceName(), photos: Array.from({ length: x.n }, (_, i) => `${i + 1}.jpg`), status: "new" };
-        await Shelf.putRaw(`${base}/batch.json`, b64ofText(JSON.stringify(batch)), `本棚の写真：${x.place}（${x.n}枚）`);
+        await Shelf.putRaw(`${base}/batch.json`, b64ofText(JSON.stringify(batch)), `本棚の写真：${x.place}（${x.n}枚）`, PB);
         await HELD.del(x.id);
         phLoad();
       } catch (e) { x.err = e.message; await HELD.put(x); }
@@ -153,13 +157,14 @@ const ST = { new: ["warn", "読み取り待ち"], read: ["acc", "候補あり・
 async function phLoad() {
   $("phBatches").innerHTML = `<li class="empty">読み込んでいます…</li>`;
   try {
-    const dirs = (await Shelf.listRemote(PH.dir)).filter(x => x.type === "dir").map(x => x.name).sort().reverse();
+    const dirs = (await Shelf.listRemote(PH.dir, PB)).filter(x => x.type === "dir").map(x => x.name).sort().reverse();
     PH.batches = (await Promise.all(dirs.map(async d => {
-      const b = await Shelf.readRemote(`${PH.dir}/${d}/batch.json`).catch(() => null);
+      const b = await Shelf.readRemote(`${PH.dir}/${d}/batch.json`, PB).catch(() => null);
       return b ? { ...b, dir: d } : null;
     }))).filter(Boolean);
   } catch (e) { $("phBatches").innerHTML = `<li class="empty">読み込めませんでした：${esc(e.message)}</li>`; return; }
   $("phBatches").innerHTML = PH.batches.map(b => `<li><div><div class="t">${esc(b.place)}</div><div class="m"><span>${esc(b.at.slice(0, 16).replace("T", " "))}</span><span>${b.photos.length}枚</span><span class="pill ${ST[b.status]?.[0] || ""}">${esc(ST[b.status]?.[1] || b.status)}</span>${b.result ? `<span>${esc(b.result)}</span>` : ""}</div></div>${b.status === "read" || b.status === "part" ? `<button type="button" class="small pri" data-phopen="${esc(b.dir)}">確かめる</button>` : b.status === "done" ? `<button type="button" class="small quiet" data-phopen="${esc(b.dir)}">見る・直す</button>` : ""}</li>`).join("") || `<li class="empty">まだ送った写真はありません</li>`;
+  phTidy();
   const waiting = PH.batches.filter(b => b.status === "new").length;
   $("phHint").hidden = !waiting;
   $("phHint").textContent = `読み取り待ちの棚が ${waiting} つあります。撮り終えたら、Claude との会話で「本棚の写真を読んで」と頼んでください。まとめて読み取ります。`;
@@ -169,7 +174,7 @@ $("phBatches").onclick = e => { const b = e.target.closest("[data-phopen]"); if 
 
 // ---------- 候補を確かめる ----------
 async function photoUrl(path) {
-  if (!PH.urls.has(path)) PH.urls.set(path, URL.createObjectURL(await Shelf.readRemoteBlob(path)));
+  if (!PH.urls.has(path)) PH.urls.set(path, URL.createObjectURL(await Shelf.readRemoteBlob(path, PB)));
   return PH.urls.get(path);
 }
 // 候補が蔵書のどれに当たるか
@@ -193,7 +198,7 @@ let PHC = null;   // 開いている束：{ batch, items:[{...候補, on, move}]
 const isOn = c => !c.done && (c.m.owned ? c.move : c.on);
 async function phOpen(dir) {
   const b = PH.batches.find(x => x.dir === dir); if (!b) return;
-  const cand = await Shelf.readRemote(`${PH.dir}/${dir}/candidates.json`).catch(() => null);
+  const cand = await Shelf.readRemote(`${PH.dir}/${dir}/candidates.json`, PB).catch(() => null);
   if (!cand) { UI.toast("候補がまだありません"); return; }
   PHC = { batch: b, cand, items: cand.items.map((c, i) => {
     const m = phMatch(c);
@@ -201,11 +206,12 @@ async function phOpen(dir) {
     const done = c.done || (b.status !== "read" && m.owned ? { how: "had" } : null);
     return { ...c, i, m, done, on: !done && c.conf !== "low" && !m.cands, move: !m.item?.loc || m.item.loc !== b.place };
   }) };
-  const photos = await Promise.all(b.photos.map(async p => [p, await photoUrl(`${PH.dir}/${dir}/${p}`)]));
+  // 確認が終わって片付けた写真は、もう無い（候補と登録済みの印だけが残る）
+  const photos = await Promise.all(b.photos.map(async p => [p, await photoUrl(`${PH.dir}/${dir}/${p}`).catch(() => null)]));
   const byPhoto = new Map(b.photos.map(p => [p, []])); for (const c of PHC.items) (byPhoto.get(c.photo) || byPhoto.set(c.photo, []).get(c.photo)).push(c);
   $("phReview").innerHTML = `<div class="row"><h3 class="grow">${esc(b.place)}・候補 ${PHC.items.length}冊</h3><button type="button" class="pri" id="phReg">チェックした本を登録する</button><button type="button" class="quiet small" id="phClose">閉じる</button></div>
     <p class="small muted">持っている本は、チェックすると保管場所を「${esc(b.place)}」にします。持っていない本は、チェックすると新しく登録します。書名や巻数を直すと、その本にチェックが付きます。登録した本は「登録済み」になり、残りはあとからでも登録できます。</p>
-    ${photos.map(([p, url]) => `<div class="phblock"><a href="${url}" target="_blank" rel="noopener"><img class="phimg" src="${url}" alt="${esc(p)}"></a>
+    ${photos.map(([p, url]) => `<div class="phblock">${url ? `<a href="${url}" target="_blank" rel="noopener"><img class="phimg" src="${url}" alt="${esc(p)}"></a>` : `<p class="small muted">${esc(p)}：確認が終わったので写真は片付けました</p>`}
       <ul class="list">${(byPhoto.get(p) || []).map(phRow).join("") || `<li class="empty">この写真からは読み取れませんでした</li>`}</ul></div>`).join("")}
     <details><summary>候補にない本を足す</summary><div class="grid2" style="margin-top:8px"><label class="f">書名<input type="text" id="phAddT"></label><label class="f">著者<input type="text" id="phAddA"></label></div><div class="row" style="margin-top:6px"><label class="f" style="display:inline-flex;align-items:center;gap:4px">巻<input type="text" id="phAddV" style="width:4.5em"></label><button type="button" class="small" id="phAddBtn">足す</button></div></details>
     <p class="small" id="phRegMsg"></p>`;
@@ -314,13 +320,32 @@ async function phRegister() {
   const nb = { ...b, status: left ? "part" : "done", doneAt: at, result: [b.result, result].filter(Boolean).join("／") };
   delete nb.dir;
   try {
-    await Shelf.putRaw(`${PH.dir}/${b.dir}/candidates.json`, b64ofText(JSON.stringify(cand, null, 1)), `本棚の写真：${place} の候補を更新`);
-    await Shelf.putRaw(`${PH.dir}/${b.dir}/batch.json`, b64ofText(JSON.stringify(nb)), `本棚の写真：${place} を登録`);
+    await Shelf.putRaw(`${PH.dir}/${b.dir}/candidates.json`, b64ofText(JSON.stringify(cand, null, 1)), `本棚の写真：${place} の候補を更新`, PB);
+    await Shelf.putRaw(`${PH.dir}/${b.dir}/batch.json`, b64ofText(JSON.stringify(nb)), `本棚の写真：${place} を登録`, PB);
   } catch (e) { UI.toast("登録は済みましたが、写真の束に登録済みの印を付けられませんでした：" + e.message, 6000); }
   $("phRegMsg").textContent = `登録しました：${result}。${left ? `残り${left}冊は、あとからでも登録できます。` : ""}上の帯が「保存済み」になるまで開いたままにしてください。`;
   for (const c of todo) { const li = $("phReview").querySelector(`[data-phc="${c.i}"]`); if (li) li.outerHTML = phRow(c); }
   phRegBtn();
   await phLoad(); render("photos");
+}
+
+// 写真の置き場が大きくなったら、確認が終わった（登録済みの）棚の写真だけを消す。候補と登録済みの印は残す。
+// 読み取り待ち・確認の途中の棚の写真は消さない。この端末に送り途中の写真があるときは行わない
+async function phTidy() {
+  if (PH.tidying || PH.uploading) return; PH.tidying = true;
+  try {
+    if ((await HELD.all().catch(() => [])).length) return;
+    const files = await Shelf.branchFiles(PB); if (!files) return;
+    const total = files.reduce((n, f) => n + f.size, 0);
+    PH.photoBytes = total;
+    if (total < PHOTO_LIMIT) return;
+    const done = new Set(PH.batches.filter(b => b.status === "done").map(b => `${PH.dir}/${b.dir}/`));
+    if (!done.size) return;
+    const isDonePhoto = f => /\.jpe?g$/i.test(f.path) && [...done].some(d => f.path.startsWith(d));
+    const n = await Shelf.branchReplace(PB, f => !isDonePhoto(f), `本棚の写真：確認が終わった棚の写真を片付け（${new Date().toISOString().slice(0, 10)}）`);
+    if (n) UI.toast(`写真の置き場がいっぱいに近づいたので、確認が終わった棚の写真 ${n} 枚を片付けました`, 6000);
+  } catch (e) { console.warn(e); }
+  finally { PH.tidying = false; }
 }
 
 function renderPhotos() { phPlaces(); if (!PH.loaded) { PH.loaded = true; phLoad(); phHeldShow(); phRetry(); } }
