@@ -9,8 +9,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app/ui.css?v=202610231647">
-<link rel="stylesheet" href="app/bar.css?v=202610231647">
+<link rel="stylesheet" href="app/ui.css?v=202610231658">
+<link rel="stylesheet" href="app/bar.css?v=202610231658">
 <style>
 .phthumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .phthumbs figure{margin:0;display:grid;gap:4px;justify-items:center}
@@ -25,6 +25,19 @@
 #list .srg > div{padding:2px 0}
 #list .srmem{margin:6px 0 4px 14px;border-left:2px solid var(--line);padding-left:8px}
 .linklike{background:none;border:0;padding:0;min-height:0;color:inherit;text-decoration:underline;font-size:inherit;cursor:pointer}
+.rdbtn{flex:none;align-self:center;min-width:5.2em;min-height:40px;border-radius:999px;font-size:13px;display:inline-flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.15;padding:4px 12px}
+.rdbtn.on{background:var(--ok);border-color:var(--ok);color:var(--card);font-weight:700}
+.rdbtn small{font-size:10px;font-weight:400;opacity:.85}
+#list .li-wrap{display:flex;gap:10px;align-items:flex-start}
+#list .li-wrap > .grow{flex:1;min-width:0}
+.lpick{width:22px;height:22px;align-self:center;flex:none}
+.volpanel{margin:8px 0 2px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.volpanel .vols button{min-width:2.6em}
+.volpanel .vols button.read{background:var(--ok);color:var(--card);border-color:var(--ok);box-shadow:none}
+.lpickbar{position:sticky;bottom:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--card);border-top:1px solid var(--line);padding:10px 0;z-index:3}
+.dmine{background:var(--bg)}
+.dbib{border-top:1px solid var(--line);padding-top:8px;margin-top:8px}
+.dbib summary{cursor:pointer;font-weight:500}
 .notice{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
 
 .tabs{display:flex;border:1px solid var(--line);border-radius:6px;overflow-x:auto;scrollbar-width:none;background:var(--card);width:max-content;max-width:100%;min-width:0;position:sticky;top:calc(44px + env(safe-area-inset-top,0px) + 8px);z-index:5}
@@ -138,9 +151,11 @@
       <select id="fLink" aria-label="チェッカーとの結び付き"><option value="">結び付き：すべて</option><option value="yes">必読書あり</option><option value="wait">確認待ち</option><option value="no">なし</option></select>
       <label class="row small" style="gap:6px"><input type="checkbox" id="fGroup" checked> シリーズをまとめる</label>
     </div>
+    <div class="row lreadrow"><button type="button" class="small quiet" id="lpickMode" aria-pressed="false">選んでまとめて読了にする</button><label class="small row" style="gap:6px">一覧で読了にしたときの読了日<select id="lreadDate"><option value="">付けない</option><option value="today">今日の日付</option></select></label></div>
     <p class="small muted" id="listCount"></p>
     <ul class="list" id="list"></ul>
     <div class="row" style="justify-content:center"><button type="button" class="quiet" id="more" hidden>さらに表示</button></div>
+    <div class="lpickbar" id="lpickBar" hidden><span class="small grow" id="lpickN"></span><button type="button" class="small quiet" id="lpickAll">表示中をすべて選ぶ</button><button type="button" class="small quiet" id="lpickClear">選択を外す</button><button type="button" class="small quiet" id="lpickUnread">未読に戻す</button><button type="button" class="pri" id="lpickRead">読了にする</button></div>
   </section>
 
   <!-- 確認待ち -->
@@ -212,13 +227,13 @@
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-<script src="app/store.js?v=202610231647"></script>
-<script src="app/biblio.js?v=202610231647"></script>
-<script src="app/scan.js?v=202610231647"></script>
-<script src="app/ui.js?v=202610231647"></script>
-<script src="app/lib.js?v=202610231647"></script>
-<script src="app/fixes.js?v=202610231647"></script>
-<script src="app/library.js?v=202610231647"></script>
-<script src="app/photos.js?v=202610231647"></script>
+<script src="app/store.js?v=202610231658"></script>
+<script src="app/biblio.js?v=202610231658"></script>
+<script src="app/scan.js?v=202610231658"></script>
+<script src="app/ui.js?v=202610231658"></script>
+<script src="app/lib.js?v=202610231658"></script>
+<script src="app/fixes.js?v=202610231658"></script>
+<script src="app/library.js?v=202610231658"></script>
+<script src="app/photos.js?v=202610231658"></script>
 </body>
 </html>

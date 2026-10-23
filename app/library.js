@@ -278,11 +278,79 @@ function rowHtml(it) {
     it.media === "ebook" ? `<span class="pill">電子</span>` : it.media === "both" ? `<span class="pill">紙＋電子</span>` : "",
     it.st === "want" ? `<span class="pill acc">読みたい（未所持）</span>` : "",
     it.nk ? `<span class="pill acc">必読書</span>` : it.link === "wait" ? `<span class="pill warn">結び付け確認待ち</span>` : "",
-    it.kind !== "series" && it.st !== "want" ? (read ? `<span class="pill ok">読了</span>` : `<span class="pill">未読</span>`) : "",
   ].join(" ");
-  return `<li><div class="li-wrap">${it.cover ? `<img class="cover" src="${esc(it.cover)}" alt="" loading="lazy">` : ""}<div><button type="button" class="open" data-open="${esc(it.id)}"><span class="t">${esc(it.t)}</span></button><div class="m">${meta}</div><div>${pills}</div></div></div></li>`;
+  const pick = LPICK.on ? `<input type="checkbox" class="lpick" data-pick="${esc(it.id)}" aria-label="選ぶ"${LPICK.ids.has(it.id) ? " checked" : ""}>` : "";
+  return `<li data-row="${esc(it.id)}"><div class="li-wrap">${pick}${it.cover ? `<img class="cover" src="${esc(it.cover)}" alt="" loading="lazy">` : ""}<div class="grow"><button type="button" class="open" data-open="${esc(it.id)}"><span class="t">${esc(it.t)}</span></button><div class="m">${meta}</div><div>${pills}</div></div>${readCtl(it, read)}</div>${it.kind === "series" && LVOL.has(it.id) ? volPanel(it) : ""}</li>`;
 }
+// ---------- 一覧から読了を付ける ----------
+// 書誌は自動で取るもの。本人が手で付けるのは所有と読了なので、一覧の各行から1回の操作で読了を付け外しできるようにする
+const LPICK = { on: false, ids: new Set() };   // まとめて付けるときに選んだ本
+const LVOL = new Set();                        // 巻ごとの読了を開いているシリーズ
+const LS_RD = "shelf.readDate";
+const readDateMode = () => { try { return localStorage.getItem(LS_RD) || ""; } catch { return ""; } };
+const readDateNow = () => readDateMode() === "today" ? UI.today() : null;
+function ownedVols(it) { return Object.entries(it.vols || {}).filter(([, v]) => v.own).sort((a, b) => svNum(a[0]) - svNum(b[0])); }
+function readCtl(it, read) {
+  if (it.kind === "series") {
+    if (it.issues) return "";
+    const ov = ownedVols(it), r = ov.filter(([, v]) => v.read).length;
+    return `<button type="button" class="rdbtn${ov.length && r === ov.length ? " on" : ""}" data-rdser="${esc(it.id)}" aria-expanded="${LVOL.has(it.id)}">読了 ${r}/${ov.length}巻 ${LVOL.has(it.id) ? "▴" : "▾"}</button>`;
+  }
+  const d = read ? Lib.readDate(it) : "";
+  return `<button type="button" class="rdbtn${read ? " on" : ""}" data-rd="${esc(it.id)}" aria-pressed="${read}" title="押すと読了／未読が切り替わります">${read ? "✓ 読了" : "未読"}${d ? `<small>${esc(d)}</small>` : ""}</button>`;
+}
+function volPanel(it) {
+  const ov = ownedVols(it);
+  return `<div class="volpanel" data-vp="${esc(it.id)}"><div class="vols">${ov.map(([n, v]) => `<button type="button" class="${v.read ? "read" : ""}" data-vr="${esc(n)}" aria-pressed="${!!v.read}">${esc(n)}</button>`).join("") || `<span class="small muted">持っている巻がありません</span>`}</div>
+    <div class="row"><label class="f" style="display:inline-flex;align-items:center;gap:6px">ここまで読んだ<input type="number" min="1" data-vupto style="width:5em"></label><button type="button" class="small" data-vupbtn>読了にする</button><button type="button" class="small quiet" data-vall="1">全部読了</button><button type="button" class="small quiet" data-vall="">全部未読</button></div></div>`;
+}
+function setSeriesRead(id, fn) {
+  const it = JSON.parse(JSON.stringify(Lib.get(id))); const date = readDateNow() || 1;
+  for (const [n, v] of Object.entries(it.vols || {})) { if (!v.own) continue; const on = fn(n, v); if (on === true && !v.read) v.read = date; else if (on === false) delete v.read; }
+  Lib.put(it); return it;
+}
+function setBookRead(id, on) { const it = Lib.get(id); if (!it) return; if (on !== Lib.isRead(it) || (on && readDateNow())) Lib.setRead(it, on, on ? readDateNow() : null); }
+function refreshRow(id) {
+  const li = $("list").querySelector(`[data-row="${CSS.escape(id)}"]`), it = Lib.get(id);
+  if (li && it) li.outerHTML = rowHtml(it);
+}
+function pickSync() {
+  $("lpickBar").hidden = !LPICK.on;
+  $("lpickN").textContent = LPICK.ids.size ? `${LPICK.ids.size}冊を選んでいます` : "読了を付ける本を選んでください";
+  $("lpickRead").disabled = $("lpickUnread").disabled = !LPICK.ids.size;
+  $("lpickMode").setAttribute("aria-pressed", LPICK.on);
+  $("lpickMode").textContent = LPICK.on ? "選ぶのをやめる" : "選んでまとめて読了にする";
+}
+$("lpickMode").onclick = () => { LPICK.on = !LPICK.on; if (!LPICK.on) LPICK.ids.clear(); pickSync(); renderList(); };
+$("lpickAll").onclick = () => { for (const li of $("list").querySelectorAll("[data-pick]")) LPICK.ids.add(li.dataset.pick); pickSync(); renderList(); };
+$("lpickClear").onclick = () => { LPICK.ids.clear(); pickSync(); renderList(); };
+const pickApply = on => {
+  let n = 0;
+  for (const id of LPICK.ids) { const it = Lib.get(id); if (!it) continue; if (it.kind === "series") setSeriesRead(id, () => on); else setBookRead(id, on); n++; }
+  UI.toast(`${n}冊を${on ? "読了" : "未読"}にしました`); LPICK.ids.clear(); pickSync(); renderList();
+};
+$("lpickRead").onclick = () => pickApply(true);
+$("lpickUnread").onclick = () => pickApply(false);
+$("lreadDate").value = readDateMode();
+$("lreadDate").onchange = () => { try { localStorage.setItem(LS_RD, $("lreadDate").value); } catch {} };
+
+$("list").addEventListener("change", e => {
+  const p = e.target.closest("[data-pick]"); if (!p) return;
+  if (p.checked) LPICK.ids.add(p.dataset.pick); else LPICK.ids.delete(p.dataset.pick); pickSync();
+});
 $("list").addEventListener("click", e => {
+  const rb = e.target.closest("[data-rd]");
+  if (rb) { const id = rb.dataset.rd, it = Lib.get(id); setBookRead(id, !Lib.isRead(it)); refreshRow(id); return; }
+  const rs = e.target.closest("[data-rdser]");
+  if (rs) { const id = rs.dataset.rdser; if (LVOL.has(id)) LVOL.delete(id); else LVOL.add(id); refreshRow(id); return; }
+  const vp = e.target.closest("[data-vp]");
+  if (vp) {
+    const id = vp.dataset.vp, vr = e.target.closest("[data-vr]"), up = e.target.closest("[data-vupbtn]"), all = e.target.closest("[data-vall]");
+    if (vr) { setSeriesRead(id, n => n === vr.dataset.vr ? !Lib.get(id).vols[n].read : undefined); refreshRow(id); }
+    else if (up) { const k = +vp.querySelector("[data-vupto]").value; if (!k) return; setSeriesRead(id, n => svNum(n) <= k ? true : undefined); refreshRow(id); UI.toast(`${k}巻まで読了にしました`); }
+    else if (all) { setSeriesRead(id, () => !!all.dataset.vall); refreshRow(id); }
+    return;
+  }
   const g = e.target.closest("[data-srg]"); if (g) { const k = g.dataset.srg; if (srOpen.has(k)) srOpen.delete(k); else srOpen.add(k); renderList(); return; }
   const o = e.target.closest("[data-open]"); if (o) { openDetail(o.dataset.open); return; }
   const c = e.target.closest("[data-by]");
@@ -336,22 +404,32 @@ function openDetail(id) {
   const places = Object.values(Lib.places());
   const f = (key, label, type = "text") => `<label class="f">${label}<input type="${type}" data-k="${key}" value="${esc(it[key] ?? "")}"></label>`;
   const html = `
+    <div class="card dmine">
+      <h3>所有と読了</h3>
+      <div class="row">
+        <span class="pill ${it.st === "own" ? "ok" : it.st === "want" ? "acc" : "warn"}">${{ own: "所有", off: "所有を外した", gone: "手放した", want: "読みたい（未所持）" }[it.st]}</span>
+        ${it.st === "want" ? `<button type="button" class="small" data-st="own">買った（所有にする）</button>` : it.st !== "own" ? `<button type="button" class="small" data-st="own">所有に戻す</button>` : `<button type="button" class="quiet small" data-st="off">所有を外す</button><button type="button" class="quiet small" data-st="gone">手放した</button>`}
+      </div>
+      ${it.kind === "series" ? "" : `<div class="row"><label class="row" style="gap:6px"><input type="checkbox" id="dRead"${read ? " checked" : ""}> 読了</label>
+        <input type="date" id="dReadDate" value="${esc(rd)}" aria-label="読了日"><button type="button" class="small quiet" id="dToday">今日</button><span class="small muted">${it.nk ? "必読書チェッカーと共有しています" : ""}</span></div>
+        <p class="small muted">読了と日付は、押したときにすぐ記録されます。</p>`}
+      <div class="row"><label class="f" style="flex:1">保管場所<input type="text" id="dLoc" list="plDl" value="${esc(it.loc || "")}"><datalist id="plDl">${places.map(p => `<option value="${esc(p)}">`).join("")}</datalist></label><button type="button" class="small quiet" id="dLocSave">場所を保存</button></div>
+    </div>
+    ${it.kind === "series" ? seriesHtml(it) : ""}
+    ${it.sr ? seriesSiblingsHtml(it) : ""}
+    <details class="dbib"><summary>書誌（自動で取得したもの。違っているときだけ直す）</summary>
     <div class="grid2">
       ${f("t", "書名")}${f("a", "著者")}
       <label class="f">種類<select data-k="cat">${CATS.map(c => `<option${c === it.cat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
       <label class="f">判型<select data-k="fmt"><option value="">（未設定）</option>${Biblio.FORMATS.map(c => `<option${c === it.fmt ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
       <label class="f">紙か電子か<select data-k="media"><option value="paper"${!it.media || it.media === "paper" ? " selected" : ""}>紙</option><option value="ebook"${it.media === "ebook" ? " selected" : ""}>電子</option><option value="both"${it.media === "both" ? " selected" : ""}>紙と電子の両方</option></select></label>
-      <label class="f">保管場所<input type="text" data-k="loc" list="plDl" value="${esc(it.loc || "")}"><datalist id="plDl">${places.map(p => `<option value="${esc(p)}">`).join("")}</datalist></label>
       ${f("pub", "出版社")}${f("label", "レーベル")}${f("tr", "訳者")}${f("y", "刊行年", "number")}
       ${it.kind !== "series" ? f("isbn", "ISBN") : ""}${f("note", "版のメモ")}
       ${it.kind !== "series" ? `<label class="f">シリーズ名（副題つきの巻のシリーズ）<input type="text" data-k="sr" list="srDl" value="${esc(it.sr || "")}" placeholder="例：ハリー・ポッター"><datalist id="srDl">${[...new Set(Object.values(Lib.items()).map(x => x.sr).filter(Boolean))].sort().map(n => `<option value="${esc(n)}">`).join("")}</datalist></label>${f("sv", "シリーズの中の順番（巻）")}` : ""}
     </div>
-    ${it.sr ? seriesSiblingsHtml(it) : ""}
+    <div class="row"><button type="button" id="dSave">書誌を保存する</button></div>
     ${it.buy?.length ? `<p class="small muted">購入：${it.buy.map(b => esc([b.d, b.shop, b.v ? b.v + (it.issues ? "" : "巻") : "", b.ed || ""].filter(Boolean).join(" "))).join("／")}</p>` : ""}
     ${it.alt?.length ? `<p class="small muted">ほかの版：${it.alt.map(x => esc([x.fmt, x.pub, x.isbn, x.media === "ebook" ? "電子" : ""].filter(Boolean).join(" "))).join("／")}</p>` : ""}
-    ${it.kind === "series" ? seriesHtml(it) : `
-    <div class="row"><label class="row" style="gap:6px"><input type="checkbox" id="dRead"${read ? " checked" : ""}> 読了</label>
-      <input type="date" id="dReadDate" value="${esc(rd)}" aria-label="読了日"><span class="small muted">${it.nk ? "必読書チェッカーと共有しています" : ""}</span></div>`}
     <div class="card" style="background:var(--bg)">
       <h3>必読書チェッカーとの結び付き</h3>
       ${work ? `<p><b>${esc(work.t)}</b>（${esc(work.a)}・${work.y}）<span class="pill acc">${esc(Biblio.tierNm(work.sc))}</span></p><div class="row"><a class="btn quiet small" href="novels.html">チェッカーを開く</a><button type="button" class="quiet small" id="dUnlink">結び付けを外す</button></div>`
@@ -359,11 +437,8 @@ function openDetail(id) {
       <div class="row"><input type="search" id="dWq" class="grow" placeholder="作品名で探して結び付ける" aria-label="作品名で探す"><button type="button" class="small quiet" id="dWbtn">探す</button></div>
       <div class="cands" id="dWres"></div>
     </div>
-    <div class="row">
-      <span class="small muted grow">状態：${{ own: "所有", off: "所有を外した", gone: "手放した", want: "読みたい（未所持）" }[it.st]}・登録の入口：${esc(it.src)}</span>
-      ${it.st === "want" ? `<button type="button" class="small" data-st="own">買った（所有にする）</button>` : it.st !== "own" ? `<button type="button" class="small" data-st="own">所有に戻す</button>` : `<button type="button" class="quiet small" data-st="off">所有を外す</button><button type="button" class="quiet small" data-st="gone">手放した</button>`}
-    </div>
-    <div class="row"><button type="button" id="dSave">保存する</button><span class="grow"></span><button type="button" class="danger small" id="dDel">記録を消す</button></div>
+    <div class="row"><span class="small muted grow">登録の入口：${esc(it.src)}</span><button type="button" class="danger small" id="dDel">記録を消す</button></div>
+    </details>
     <p class="small" id="dDelConfirm" hidden>本当に消しますか？ 消した記録は戻せません。<button type="button" class="danger small" id="dDelYes">消す</button></p>`;
   const d = UI.dialog(it.t || "詳細", html, () => render());
   const q = s => d.querySelector(s);
@@ -374,13 +449,18 @@ function openDetail(id) {
     // シリーズを外したら、同じシリーズ名ではもう自動でまとめない
     if (it0.sr && Lib.srKey(it0.sr) !== Lib.srKey(it.sr || "")) it.srNo = [...new Set([].concat(it.srNo || [], Lib.srKey(it0.sr)))];
     if (it.sr) it.srNo = [].concat(it.srNo || []).filter(k => k !== Lib.srKey(it.sr)); if (it.srNo && !it.srNo.length) delete it.srNo;
+    if (q("#dLoc")) { const l = q("#dLoc").value.trim(); if (l) it.loc = l; else delete it.loc; }
     Lib.put(it);
-    if (it.kind !== "series") {
-      const on = q("#dRead").checked, date = q("#dReadDate").value;
-      if (on !== read || (on && date !== rd)) Lib.setRead(it, on, date || null);
-    }
-    UI.toast("保存しました"); d.close();
+    UI.toast("書誌を保存しました"); d.close();
   };
+  // 読了・読了日・保管場所は、押したときにすぐ記録する（書誌の保存とは別）
+  if (q("#dRead")) {
+    const apply = () => { const on = q("#dRead").checked, date = q("#dReadDate").value; Lib.setRead(Lib.get(it.id), on, on ? date || null : null); UI.toast(on ? `読了にしました${date ? "（" + date + "）" : ""}` : "未読に戻しました"); };
+    q("#dRead").onchange = apply;
+    q("#dReadDate").onchange = () => { if (q("#dReadDate").value) q("#dRead").checked = true; apply(); };
+    q("#dToday").onclick = () => { q("#dReadDate").value = UI.today(); q("#dRead").checked = true; apply(); };
+  }
+  q("#dLocSave").onclick = () => { const x = JSON.parse(JSON.stringify(Lib.get(it.id))); const l = q("#dLoc").value.trim(); if (l) x.loc = l; else delete x.loc; Lib.put(x); it.loc = x.loc; UI.toast("保管場所を保存しました"); };
   d.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { Lib.setStatus(it0, b.dataset.st); UI.toast(it0.st === "want" ? "所有にしました" : { own: "所有に戻しました", off: "所有を外しました", gone: "手放したことにしました" }[b.dataset.st]); d.close(); });
   d.querySelectorAll("[data-sib]").forEach(b => b.onclick = () => { d.close(); setTimeout(() => openDetail(b.dataset.sib), 50); });
   q("#dDel").onclick = () => { q("#dDelConfirm").hidden = false; };
