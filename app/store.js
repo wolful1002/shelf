@@ -60,11 +60,44 @@
     anySubs.forEach(f => { try { f(path, remote); } catch (e) { console.error(e); } });
   }
   async function persistFile(path) { await idbSet("f:" + path, files.get(path)); }
-  // 送信待ちは画面を移ってもなくならないよう、すぐに端末へ書く（大きすぎて書けなければIndexedDBへ）
-  function persistQueue() {
-    try { localStorage.setItem("shelf.queue", JSON.stringify(queue)); localStorage.removeItem("shelf.queueInIdb"); }
-    catch { idbSet("queue", queue); try { localStorage.setItem("shelf.queueInIdb", "1"); } catch {} }
+  // ---------- 送信待ち（タブどうしで共有する） ----------
+  // 送信待ちは端末のIndexedDBの1か所（"queue"）にだけ置き、どのタブも「鍵」（Web Locks）を取ってから足し引きする。
+  // 送るのは鍵 "shelf-flush" を取れた1つのタブだけ。こうすると、複数のタブで開いても送信待ちを上書きで失わない
+  const newKey = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const unsaved = new Set();                  // このタブで足したが、まだ共有の送信待ちに書き終えていない操作
+  const bc = (() => { try { return new BroadcastChannel("shelf"); } catch { return null; } })();
+  const withLock = (name, opt, fn) => navigator.locks ? navigator.locks.request(name, opt, fn) : fn({});
+  // 共有の送信待ちと、まだ共有に書けていないこのタブの操作を合わせたもの
+  function mergeMem(shared) {
+    const have = new Set(shared.map(o => o.k));
+    return shared.concat(queue.filter(o => unsaved.has(o.k) && !have.has(o.k)));
   }
+  async function qUpdate(fn) {
+    let out = null;
+    await withLock("shelf-queue", {}, async () => {
+      const shared = (await idbGet("queue")) || [];
+      out = fn(shared);
+      await idbSet("queue", out);
+    });
+    queue = mergeMem(out);
+    if (bc) try { bc.postMessage({ type: "queue" }); } catch {}
+    return out;
+  }
+  async function reloadQueue() {
+    queue = mergeMem((await idbGet("queue")) || []);
+    // ほかのタブが送り終えたら、このタブの表示も「保存済み」にする
+    if (!queue.length && status.state === "pending") setStatus({ state: "ok", msg: "保存しました" }); else setStatus({});
+  }
+  function enqueue(op) {
+    op.k = newKey(); queue.push(op); unsaved.add(op.k);
+    qUpdate(q => q.some(o => o.k === op.k) ? q : q.concat([op])).then(() => { unsaved.delete(op.k); flush(); });
+  }
+  if (bc) bc.onmessage = e => {
+    const m = e.data || {};
+    if (m.type === "queue") reloadQueue();
+    else if (m.type === "sent") { reloadQueue(); setTimeout(() => refresh(), 500); }
+    else if (m.type === "idle") reloadQueue().then(() => { if (queue.length) flush(); });
+  };
   // 端末で書き換えた回数。取り直しの途中で書き換えたファイルは、古い中身で上書きしない
   const ver = new Map();
   const bump = p => ver.set(p, (ver.get(p) || 0) + 1);
@@ -174,6 +207,22 @@
     if (refreshing) { try { await refreshing; } catch {} if (flushing || !queue.length) return; }
     if (!navigator.onLine || !token()) { setStatus({ state: navigator.onLine ? "notoken" : "offline" }); return; }
     flushing = true;
+    let ok = false;
+    try {
+      // ほかのタブが送っている間は送らない（そのタブが、このタブの分もまとめて送る）
+      await withLock("shelf-flush", { ifAvailable: true }, async lock => {
+        if (!lock) { setStatus({ state: "pending", msg: "ほかのタブが送信中" }); return; }
+        ok = await flushLocked();
+      });
+    } finally {
+      flushing = false;
+      // 送り終えたら、ほかのタブに知らせる（送る直前に足された分があれば、そのタブが送る）
+      if (ok && bc) try { bc.postMessage({ type: "idle" }); } catch {}
+    }
+  }
+  async function flushLocked() {
+    await reloadQueue();
+    if (!queue.length) return true;
     setStatus({ state: "syncing", msg: "送信中" });
     try {
       while (queue.length) {
@@ -205,11 +254,12 @@
           if (res.ok) {
             const j = await res.json();
             tree[path] = j.content.sha; idbSet("tree", tree); bump(path);
-            const sent = new Set(ops);
-            queue = queue.filter(o => !sent.has(o));
+            const sent = new Set(ops.map(o => o.k));
+            await qUpdate(q => q.filter(o => !sent.has(o.k)));
             files.set(path, { sha: j.content.sha, data: applyPending(path, data) });
-            persistQueue(); await persistFile(path);
+            await persistFile(path);
             emit(path, false);
+            if (bc) try { bc.postMessage({ type: "sent", path }); } catch {}
             setStatus({});
             break;
           }
@@ -219,10 +269,12 @@
         }
       }
       setStatus({ state: "ok", msg: "保存しました" });
+      return true;
     } catch (e) {
       setStatus({ state: "error", msg: e.message + "。端末に残しています。しばらくして自動で再送します" });
       setTimeout(flush, 20000);
-    } finally { flushing = false; }
+      return false;
+    }
   }
 
   // ---------- 公開する窓口 ----------
@@ -243,10 +295,15 @@
       ready = (async () => {
         const t = await idbGet("tree"); if (t) tree = t;
         known = (await idbGet("known")) || tree;
-        let q = null;
-        try { q = localStorage.getItem("shelf.queueInIdb") ? await idbGet("queue") : JSON.parse(localStorage.getItem("shelf.queue") || "null"); } catch {}
-        if (!q) q = await idbGet("queue");
-        if (Array.isArray(q)) queue = q;
+        // 以前の形（localStorage）の送信待ちが残っていれば、共有の送信待ちに移す
+        let old = null;
+        try { old = localStorage.getItem("shelf.queueInIdb") ? null : JSON.parse(localStorage.getItem("shelf.queue") || "null"); } catch {}
+        await qUpdate(q => {
+          q = (q || []).map(o => o.k ? o : { ...o, k: newKey() });
+          if (Array.isArray(old) && old.length) q = q.concat(old.map(o => ({ ...o, k: newKey() })));
+          return q;
+        });
+        try { localStorage.removeItem("shelf.queue"); localStorage.removeItem("shelf.queueInIdb"); } catch {}
         // 端末の写しから読むのは、この画面に要るファイルだけ（ほかの画面の作品データまで読むと開くのが遅くなる）
         const fs = await Promise.all(Object.keys(tree).filter(p => !needRe || needRe.test(p)).map(async p => [p, await idbGet("f:" + p)]));
         for (const [p, f] of fs) if (f) files.set(p, f);
@@ -278,18 +335,18 @@
     list: prefix => [...files.keys()].filter(p => p.startsWith(prefix)),
     // 文書を丸ごと書く
     writeDoc(path, body) {
-      queue.push({ t: "doc", path, body: clone(body) }); bump(path);
+      enqueue({ t: "doc", path, body: clone(body) }); bump(path);
       files.set(path, { sha: files.get(path)?.sha, data: clone(body) });
-      persistFile(path); persistQueue(); setStatus({ state: "pending" }); emit(path, false); flush();
+      persistFile(path); setStatus({ state: "pending" }); emit(path, false);
     },
     // {items:{}} 形式のファイルの1項目を書く（null で消す）
     writeItem(path, id, value) {
-      queue.push({ t: "item", path, id, value: value === null ? null : clone(value) }); bump(path);
+      enqueue({ t: "item", path, id, value: value === null ? null : clone(value) }); bump(path);
       const cur = files.get(path) || { sha: undefined, data: { items: {} } };
       const data = clone(cur.data) || { items: {} }; data.items = data.items || {};
       if (value === null) delete data.items[id]; else data.items[id] = clone(value);
       files.set(path, { sha: cur.sha, data });
-      persistFile(path); persistQueue(); setStatus({ state: "pending" }); emit(path, false); flush();
+      persistFile(path); setStatus({ state: "pending" }); emit(path, false);
     },
     on(path, cb) { if (!subs.has(path)) subs.set(path, new Set()); subs.get(path).add(cb); return () => subs.get(path).delete(cb); },
     onAny(cb) { anySubs.add(cb); return () => anySubs.delete(cb); },
