@@ -9,8 +9,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app/ui.css?v=202610231512">
-<link rel="stylesheet" href="app/bar.css?v=202610231512">
+<link rel="stylesheet" href="app/ui.css?v=202610231515">
+<link rel="stylesheet" href="app/bar.css?v=202610231515">
 <style>
 .phthumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .phthumbs figure{margin:0;display:grid;gap:4px;justify-items:center}
@@ -181,6 +181,7 @@
     <p class="small muted">1枚に1段ほどが目安です。背表紙の文字が読める近さで、正面から撮ってください。</p>
     <div class="row"><label class="btn">写真を撮る<input type="file" id="phCam" accept="image/*" capture="environment" hidden></label><label class="btn quiet">写真を選ぶ（何枚でも）<input type="file" id="phPick" accept="image/*" multiple hidden></label><button type="button" class="pri" id="phSend" disabled>この棚の写真を取っておく</button></div>
     <div class="phthumbs" id="phThumbs"></div>
+    <p class="small muted" id="phCap" hidden></p>
     <p class="small" id="phMsg" role="status"></p>
     <div id="phHeldBox" hidden><h3>撮った棚（順に送っています）</h3><ul class="list" id="phHeld"></ul></div>
     <h3>2. 送った棚・候補を確かめる</h3>
@@ -202,13 +203,13 @@
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-<script src="app/store.js?v=202610231512"></script>
-<script src="app/biblio.js?v=202610231512"></script>
-<script src="app/scan.js?v=202610231512"></script>
-<script src="app/ui.js?v=202610231512"></script>
-<script src="app/lib.js?v=202610231512"></script>
-<script src="app/fixes.js?v=202610231512"></script>
-<script src="app/library.js?v=202610231512"></script>
-<script src="app/photos.js?v=202610231512"></script>
+<script src="app/store.js?v=202610231515"></script>
+<script src="app/biblio.js?v=202610231515"></script>
+<script src="app/scan.js?v=202610231515"></script>
+<script src="app/ui.js?v=202610231515"></script>
+<script src="app/lib.js?v=202610231515"></script>
+<script src="app/fixes.js?v=202610231515"></script>
+<script src="app/library.js?v=202610231515"></script>
+<script src="app/photos.js?v=202610231515"></script>
 </body>
 </html>

@@ -35,10 +35,25 @@ $("phPlace").onchange = () => { $("phNewWrap").hidden = $("phPlace").value !== "
 $("phNewPlace").oninput = phSync;
 function phPlaceName() { return $("phPlace").value === "__new" ? $("phNewPlace").value.trim() : $("phPlace").value; }
 function phSync() { $("phSend").disabled = !PH.files.length || !phPlaceName(); $("phSend").textContent = PH.files.length ? `この棚の写真（${PH.files.length}枚）を取っておく` : "この棚の写真を取っておく"; }
+// 端末にあと何枚取っておけるか（1枚およそ1.5MBとして、端末の空きから見積もる。余裕として30MBは残す）。分からないときは null
+const PER_PHOTO = 1.5e6;
+async function phRoom() {
+  try { const e = await navigator.storage?.estimate?.(); if (!e || !e.quota) return null; return Math.max(0, Math.floor((e.quota - (e.usage || 0) - 30e6) / PER_PHOTO)); } catch { return null; }
+}
+async function phCapShow() {
+  const room = await phRoom(), n = PH.files.length, held = PH.heldN || 0;
+  const el = $("phCap");
+  if (room == null || (!n && !held)) { el.hidden = true; return; }
+  el.hidden = false;
+  el.className = "small " + (n > room ? "notice" : "muted");
+  el.textContent = n > room
+    ? `端末の空きが足りません。あと約${room}枚しか取っておけません（選んだのは${n}枚）。送り終わるのを待つと空きが増えます。`
+    : `端末にあと約${room}枚取っておけます。送り終えた写真は端末から消えるので、そのぶん空きが戻ります。`;
+}
 function addFiles(list) {
   for (const f of list) PH.files.push({ f, url: URL.createObjectURL(f) });
   $("phThumbs").innerHTML = PH.files.map((x, i) => `<figure><img src="${x.url}" alt="${i + 1}枚目"><button type="button" class="small quiet" data-phdel="${i}">外す</button></figure>`).join("");
-  phSync();
+  phSync(); phCapShow();
 }
 $("phCam").onchange = e => { addFiles(e.target.files); e.target.value = ""; };
 $("phPick").onchange = e => { addFiles(e.target.files); e.target.value = ""; };
@@ -73,6 +88,10 @@ $("phSend").onclick = async () => {
   $("phSend").disabled = true;
   const id = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-") + "-" + Math.random().toString(36).slice(2, 5);
   const files = PH.files.map(x => x.f);
+  const room = await phRoom();
+  if (room != null && files.length > room) { await phCapShow(); $("phMsg").textContent = `端末の空きが足りないので取っておけませんでした（あと約${room}枚分）。送り終わるのを待つか、枚数を減らしてください。`; phSync(); return; }
+  // 端末が空きを作るために写真を勝手に消さないよう頼む（断られても動きは同じ）
+  try { navigator.storage?.persist?.(); } catch {}
   try {
     // 1枚ずつ縮めて、すぐ端末にしまう（全部を同時にメモリに持たない）
     for (let i = 0; i < files.length; i++) {
@@ -92,6 +111,7 @@ $("phSend").onclick = async () => {
 };
 async function phHeldShow() {
   const list = await HELD.all().catch(() => []);
+  PH.heldN = list.reduce((k, x) => k + x.n - (x.sent || 0), 0); phCapShow();
   $("phHeldBox").hidden = !list.length;
   $("phHeld").innerHTML = list.sort((a, b) => a.id < b.id ? -1 : 1).map(x => `<li><div class="grow"><div class="t">${esc(x.place)}</div><div class="m"><span>${x.n}枚</span><span class="pill ${x.err ? "warn" : ""}">${x.err ? "送れていません（あとで送り直します）" : PH.sending === x.id ? `送っています（${x.sent}/${x.n}）` : "送る順番を待っています"}</span></div></div>${PH.sending === x.id ? "" : `<button type="button" class="small quiet" data-phheld="${esc(x.id)}">取りやめる</button>`}</li>`).join("");
 }
