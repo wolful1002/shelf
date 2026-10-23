@@ -104,10 +104,18 @@
     const hits = [...(titleIndex().get(k) || [])].map(id => L.get(id)).filter(it => it && it.kind !== "series" && it.id !== excludeId && L.sameKey(it.t) === k);
     if (!hits.length) return null;
     const na = Biblio.norm(a);
-    const sameA = hits.filter(it => { const ia = Biblio.norm(it.a); return !na || !ia || ia.includes(na) || na.includes(ia); });
+    // 著者がローマ字とかなのように書き方が違うと比べられないので、比べられないときは同じとみなす
+    const latin = x => /[a-z]/.test(x) && !/[぀-ヿ一-鿿]/.test(x);
+    const sameA = hits.filter(it => { const ia = Biblio.norm(it.a); return !na || !ia || ia.includes(na) || na.includes(ia) || latin(na) !== latin(ia) || authorOverlap(a, it.a); });
     if (sameA.length === 1 && (Biblio.norm(sameA[0].a) && na ? true : hits.length === 1)) return { item: sameA[0] };
     return { cands: (sameA.length ? sameA : hits).slice(0, 5) };
   };
+  // 著者名のどれか1人が重なるか（「劉慈欣、大森望」と「劉慈欣」など）。区切りは読点・カンマ・空白
+  function authorOverlap(x, y) {
+    const toks = v => String(v || "").normalize("NFKC").split(/[、,，;；\/／]+|\s{2,}/).map(t => Biblio.norm(t.replace(/\d{4}-(\d{4})?/g, ""))).filter(t => t.length >= 2);
+    const ny = Biblio.norm(y), nx = Biblio.norm(x);
+    return toks(x).some(t => ny.includes(t)) || toks(y).some(t => nx.includes(t));
+  }
   // 空いている項目だけを埋める。手で入れた値は上書きしない。購入の記録は経路ごとに足す
   const FILL = ["a", "pub", "label", "tr", "y", "ccode", "fmt", "cover", "isbn", "asin", "mag", "loc"];
   L.absorb = (it, inp, base = {}) => {
@@ -373,7 +381,11 @@
         if (x) { L.put(x); if (x.nk && x.st === "own") L.setOwn(x.nk, true); }
         return { status: "dup", item: x || f.item, filled: !!x };
       }
-      if (f?.cands) sameCands = f.cands.map(c => c.id);
+      if (f?.cands) {
+        // 読みたい本は、同じ書名の本をすでに持っていれば付けない（著者の書き方の違いで迷うだけのことが多い）
+        if (want) { const owned = f.cands.find(c => c.st === "own"); if (owned) return { status: "dup", item: owned }; }
+        sameCands = f.cands.map(c => c.id);
+      }
     }
     const it = { id: L.newId(want ? "w" : "b"), kind: "book", t: t || "（書誌が見つかりません）", isbn: inp.isbn || undefined, asin: inp.asin || undefined, mag: inp.mag || undefined, magMonth: inp.magMonth || undefined, ...base };
     if (bib?.vol && !/^\d+$/.test(bib.vol)) it.note = [it.note, bib.vol].filter(Boolean).join("／");
