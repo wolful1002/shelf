@@ -30,3 +30,4 @@ body{margin:0}
 body::before{display:none}
 .shelfmsg{padding:10px 12px;border-radius:6px;background:#f6ead2;color:#5a3d0a;font:14px/1.5 "Zen Kaku Gothic New",system-ui,sans-serif;max-width:1040px;margin:0 auto 16px}
 @media print{.shelfbar{display:none!important}}
+.shelfbar .sb-sync[data-state="error"]{white-space:normal;font-size:11px;color:#c0392b}

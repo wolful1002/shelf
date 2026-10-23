@@ -17,7 +17,7 @@
     const pill = el.querySelector("#shelfSync");
     Shelf.onStatus(s => {
       const m = { ok: "保存済み", idle: "準備中", syncing: s.msg || "通信中", pending: `送信待ち ${s.pending}件`, offline: s.pending ? `電波なし・送信待ち ${s.pending}件` : "電波なし", error: "保存できていません", notoken: "鍵が未設定" };
-      pill.textContent = m[s.state] || s.state; pill.dataset.state = s.state; pill.title = s.msg || "";
+      pill.textContent = (m[s.state] || s.state) + (s.state === "error" && s.msg ? `：${s.msg}` : ""); pill.dataset.state = s.state; pill.title = s.msg || "";
     });
   };
 

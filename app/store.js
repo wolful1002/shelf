@@ -160,7 +160,14 @@
     });
     return res;
   }
-  async function currentSha(path) { const t = await fetchTree(); return t[path] || null; }
+  // 今の保管場所での指紋。端末に写しを持たないファイル（backup/ など）は一覧に出ないので、そのファイルを直接たずねる
+  async function currentSha(path) {
+    if (WATCH.test(path)) { const t = await fetchTree(); return t[path] || null; }
+    const res = await gh(`/contents/${encodeURI(path)}?ref=${BRANCH}`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error("ファイルの状態を確かめられませんでした（" + res.status + "）");
+    return (await res.json()).sha || null;
+  }
   async function flush() {
     if (flushing || !queue.length) return;
     // 取り直しの最中なら、終わってから送る（最新の中身に当てるため）
@@ -207,7 +214,8 @@
             break;
           }
           if ((res.status === 409 || res.status === 422) && attempt < 6) { await sleep(300 + Math.random() * 900); continue; }
-          throw new Error("送信できませんでした（" + res.status + "）");
+          let why = ""; try { why = (await res.json()).message || ""; } catch {}
+          throw new Error(`送信できませんでした（${res.status}${why ? "：" + why : ""}・${path}）`);
         }
       }
       setStatus({ state: "ok", msg: "保存しました" });
