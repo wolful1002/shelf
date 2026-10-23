@@ -258,6 +258,13 @@
     },
     refresh,
     flush,
+    // 端末に写しを持たないファイル（import/ など）を、その場で保管場所から読む。無ければ null
+    async readRemote(path) {
+      const res = await gh(`/contents/${encodeURI(path)}?ref=${BRANCH}`, { headers: { Accept: "application/vnd.github.raw+json" } });
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error("ファイルを取れませんでした（" + res.status + "）");
+      return JSON.parse(await res.text());
+    },
     has: path => files.has(path),
     read: path => files.get(path)?.data ?? null,
     list: prefix => [...files.keys()].filter(p => p.startsWith(prefix)),

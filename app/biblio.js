@@ -73,6 +73,21 @@
   async function openbd(isbn) {
     const r = await timed(`https://api.openbd.jp/v1/get?isbn=${isbn}`, 6000); if (!r) return null;
     const j = await r.json().catch(() => null); const o = j && j[0]; if (!o) return null;
+    return parseOpenbd(o);
+  }
+  // 多くのISBNをまとめて引く（openBDは1回に1,000件まで）。返り値：Map(ISBN → 書誌)。見つからないISBNは入らない
+  B.lookupMany = async (isbns, onProgress) => {
+    const out = new Map(); const list = [...new Set(isbns)];
+    for (let i = 0; i < list.length; i += 500) {
+      const part = list.slice(i, i + 500);
+      let j = null;
+      try { const r = await fetch("https://api.openbd.jp/v1/get", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "isbn=" + part.join(",") }); if (r.ok) j = await r.json(); } catch {}
+      (j || []).forEach((o, k) => { if (o) { const b = parseOpenbd(o); if (b.t) { b.trial = /試し読み|無料版|お試し/.test(b.t); out.set(part[k], b); } } });
+      onProgress && onProgress(Math.min(i + 500, list.length), list.length);
+    }
+    return out;
+  };
+  function parseOpenbd(o) {
     const s = o.summary || {};
     const subj = (o.onix?.DescriptiveDetail?.Subject || []).find(x => x.SubjectSchemeIdentifier === "78");
     const coll = o.onix?.DescriptiveDetail?.Collection?.TitleDetail?.TitleElement;

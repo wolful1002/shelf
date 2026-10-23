@@ -9,8 +9,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app/ui.css?v=202610231007">
-<link rel="stylesheet" href="app/bar.css?v=202610231007">
+<link rel="stylesheet" href="app/ui.css?v=202610231229">
+<link rel="stylesheet" href="app/bar.css?v=202610231229">
 <style>
 .tabs{display:flex;border:1px solid var(--line);border-radius:6px;overflow-x:auto;scrollbar-width:none;background:var(--card);width:max-content;max-width:100%;min-width:0;position:sticky;top:calc(44px + env(safe-area-inset-top,0px) + 8px);z-index:5}
 .tabs a{flex:0 0 auto;white-space:nowrap;text-decoration:none;color:var(--muted);padding:7px 12px;font-size:13px;border-right:1px solid var(--line)}
@@ -118,7 +118,7 @@
       <select id="fCat" aria-label="種類"></select>
       <select id="fMedia" aria-label="紙か電子か"><option value="">紙・電子</option><option value="paper">紙</option><option value="ebook">電子</option></select>
       <select id="fLoc" aria-label="保管場所"></select>
-      <select id="fRead" aria-label="読書の状況"><option value="">読書：すべて</option><option value="unread">未読</option><option value="read">読了</option></select>
+      <select id="fRead" aria-label="読書の状況"><option value="">読書：すべて</option><option value="unread">未読</option><option value="read">読了</option><option value="want">読みたい（未所持）</option></select>
       <select id="fLink" aria-label="チェッカーとの結び付き"><option value="">結び付き：すべて</option><option value="yes">必読書あり</option><option value="wait">確認待ち</option><option value="no">なし</option></select>
     </div>
     <p class="small muted" id="listCount"></p>
@@ -177,11 +177,11 @@
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-<script src="app/store.js?v=202610231007"></script>
-<script src="app/biblio.js?v=202610231007"></script>
-<script src="app/scan.js?v=202610231007"></script>
-<script src="app/ui.js?v=202610231007"></script>
-<script src="app/lib.js?v=202610231007"></script>
-<script src="app/library.js?v=202610231007"></script>
+<script src="app/store.js?v=202610231229"></script>
+<script src="app/biblio.js?v=202610231229"></script>
+<script src="app/scan.js?v=202610231229"></script>
+<script src="app/ui.js?v=202610231229"></script>
+<script src="app/lib.js?v=202610231229"></script>
+<script src="app/library.js?v=202610231229"></script>
 </body>
 </html>
