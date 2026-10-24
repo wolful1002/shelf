@@ -33,7 +33,7 @@ function render(t = location.hash.slice(1) || "register") {
   Lib.reconcile();
   fixBooklogRead();
   if (typeof runFixes === "function") { try { await runFixes(); } catch (e) { console.error(e); } }
-  try { syncBooklog(); } catch (e) { console.error(e); }
+  blAutoSync();
   Shelf.on(Lib.P.novelDoc, (d, remote) => { if (remote) { Lib.reconcile(); render(); } });
   let t = null;
   Shelf.onAny((p, remote) => { if (remote && /records\//.test(p)) { clearTimeout(t); t = setTimeout(() => render(), 300); } });
@@ -743,15 +743,8 @@ $("printLabels").onclick = () => {
 // 確認済みは設定（records/settings.json の blSeen）に、書名・著者で覚える（ブクログを取り込み直して並びが変わっても効く）
 let blShown = 100, blRows = [];
 const blSel = new Set();
-const blKey = x => Biblio.norm(x.t) + "|" + Biblio.norm(x.a);
 const blSeen = () => Lib.settings().blSeen || {};
 function setBlSeen(fn) { const s = JSON.parse(JSON.stringify(Lib.settings())); s.blSeen = s.blSeen || {}; fn(s.blSeen); Shelf.writeDoc(Lib.P.settings, s); }
-function booklogItems() {
-  const meta = Shelf.read("records/novels-checker/log.json") || {};
-  const out = [];
-  for (let i = 0; i < (meta.chunks || 0); i++) (Shelf.read(`records/novels-checker/log-${i}.json`)?.items || []).forEach((x, j) => out.push({ id: `${i}-${j}`, t: x[0], a: x[1], d: x[2], g: x[4], type: x[5] }));
-  return out;
-}
 const blRow = x => {
   const seen = !!blSeen()[blKey(x)], on = blSel.has(x.id);
   return `<li class="${seen ? "seen" : ""}${on ? " sel" : ""}" data-blrow="${x.id}"><label class="row" style="gap:10px;align-items:flex-start;flex:1;min-width:0"><input type="checkbox" data-bl="${x.id}"${on ? " checked" : ""}><span style="min-width:0"><span class="t">${esc(x.t)}</span><br><span class="m">${esc(x.a)}・${esc(x.d)}${x.type ? "・" + esc(x.type) : ""}${x.g ? "・" + esc(x.g) : ""}${seen ? "・確認済み" : ""}</span></span></label>${seen ? `<button type="button" class="small quiet" data-blunseen="${x.id}">未確認に戻す</button>` : "<span></span>"}</li>`;
@@ -826,7 +819,8 @@ $("blReg").onclick = async () => {
     const ebook = /kindle|電子|ebook/i.test(x.type || "");
     const r = await Lib.register({ t: x.t, a: x.a, src: "booklog", media: ebook ? "ebook" : "paper", bib: { t: x.t, a: x.a }, catHint: blCat(x) });
     const it = JSON.parse(JSON.stringify(r.item)); it.blk = id; it.blkKey = blKey(x); it.blkCat = 2;
-    markBooklogRead(it, r.vol, x.d); n++;
+    if (blIsRead(x)) markBooklogRead(it, r.vol, x.d); else Lib.put(it);
+    n++;
   }
   if (skip.length) setBlSeen(m => { for (const x of skip) m[blKey(x)] = 1; });
   blSel.clear();
@@ -835,22 +829,6 @@ $("blReg").onclick = async () => {
   setTimeout(renderBooklog, 50);
 };
 
-// ブクログの記録は読んだ本の記録なので、そこから登録した本は読了にする。
-// 読了日はブクログの日付（2011年の日付は一括取り込みの日なので使わない。チェッカーと同じ扱い）。
-// すでに付いている読了の日付は書き換えない
-const blDate = d => /^\d{4}-\d{2}-\d{2}/.test(d || "") && !String(d).startsWith("2011") ? String(d).slice(0, 10) : "";
-function markBooklogRead(it, vol, d) {
-  const date = blDate(d);
-  if (it.kind === "series") {
-    if (vol != null) { it.vols = it.vols || {}; const v = it.vols[vol] || {}; if (!v.read) it.vols[vol] = { ...v, read: date || 1 }; }
-  } else if (it.nk) {
-    if (!Lib.ndoc().read[it.nk]) Lib.setNovelRead(it.nk, date || 1);
-  } else if (!Lib.reading()["b:" + it.id]) {
-    Lib.setReading("b:" + it.id, { s: "read", d: date || undefined, via: "booklog", n: 1 });
-  }
-  it.blkRead = 1;
-  Lib.put(it);
-}
 // ブクログの「カテゴリ」と「種別」から本の種類を決める（書誌にCコードがないため）。
 // 決めきれないカテゴリ（空欄・死/不死/ゾンビ）は、これまでどおり確認待ちに回す
 const BL_CAT = { "ファンタジー": "小説", "ＳＦ": "小説", "SF": "小説", "ミステリ/ホラー/サスペンス": "小説", "未分類（フィクション）": "小説",
@@ -860,79 +838,6 @@ function blCat(x) {
   if (x.type === "マンガ") return "漫画";
   if (x.type === "雑誌") return "雑誌";
   return BL_CAT[(x.g || "").trim()] || null;
-}
-// ---------- ブクログの読了記録と蔵書の突き合わせ ----------
-// 購入履歴・写真・スキャンなど、ブクログ以外から登録した本に、ブクログの読了記録を結び付ける。画面を開くたびに、まだ結び付いていない記録だけを見る。
-// はっきり同じ本と分かるもの（ISBN・チェッカーの作品・書名と著者が1冊に絞れる）は読了にする。
-// 迷うもの（同じ書名の本が複数・著者の書き方が違う・上下巻の片方など）は確認待ち「ブクログの読了記録」で本人に聞く。「違う本」と答えた組は二度と聞かない
-const blBase = t => String(t || "").normalize("NFKC").replace(/\([^()]*(?:\([^()]*\)[^()]*)*\)/g, " ").replace(/[〈《【\[][^〉》】\]]*[〉》】\]]/g, " ").replace(/\s+/g, " ").trim();
-function blVolPart(t) {
-  const m = blBase(t).match(/^(.{2,}?)\s*(上|中|下|上巻|中巻|下巻|前編|後編|[IVX]{1,4}|\d{1,2})$/);
-  return m ? m[1] : null;
-}
-function syncBooklog() {
-  const items = Object.values(Lib.items());
-  const done = new Set(items.flatMap(it => [it.blk, ...(it.blks || [])]).filter(Boolean));
-  const doneKey = new Set(items.flatMap(it => [it.blkKey, ...(it.blkKeys || [])]).filter(Boolean));
-  const asked = new Set(Object.values(Lib.queue()).filter(q => q.type === "blread").map(q => q.blk));
-  const said = it => new Set([].concat(it.blkNo || []));
-  let auto = 0, ask = 0;
-  const link = (it0, x, vol, ed) => {
-    const it = JSON.parse(JSON.stringify(Lib.get(it0.id)));
-    it.blks = [...new Set([...(it.blks || []), x.id])].filter(b => b !== it.blk); if (!it.blks.length) delete it.blks;
-    it.blkKeys = [...new Set([...(it.blkKeys || []), blKey(x)])].filter(b => b !== it.blkKey); if (!it.blkKeys.length) delete it.blkKeys;
-    if (it.kind === "series" && vol != null) { const vm = ed ? it.eds[ed].vols : it.vols; const v = vm[vol]; if (v && !v.read) v.read = blDate(x.d) || 1; Lib.put(it); }
-    else markBooklogRead(it, null, x.d);
-    done.add(x.id); doneKey.add(blKey(x));
-  };
-  const own = it => it && it.st === "own";
-  Lib.batchBegin();
-  try {
-    for (const x of booklogItems()) {
-      const key = blKey(x);
-      if (done.has(x.id) || doneKey.has(key) || asked.has(key)) continue;
-      // 1. チェッカーの作品で結び付いた本
-      const m = Biblio.matchNovel(x.t, x.a);
-      if (m.status === "auto") { const it = Object.values(Lib.items()).find(it => it.nk === m.work.k && it.kind !== "series"); if (own(it) && !said(it).has(key)) { link(it, x); auto++; continue; } }
-      // 2. 漫画などの巻
-      const se = Lib.splitEd(x.t), sv = Biblio.splitVolume(se.base);
-      if (sv.vol != null) { const s = Lib.seriesFor(sv.base); const vm = s ? (se.ed ? s.eds?.[se.ed]?.vols : s.vols) : null; if (own(s) && vm?.[sv.vol]?.own && !said(s).has(key)) { link(s, x, sv.vol, se.ed); auto++; continue; } }
-      // 3. 書名と著者
-      const f = Lib.findSameByTitle(x.t, x.a);
-      if (f?.item) { if (own(f.item) && !said(f.item).has(key)) { link(f.item, x); auto++; } continue; }
-      let cands = (f?.cands || []).filter(c => own(c) && !said(c).has(key));
-      let why = "ブクログに同じ書名の読了記録があります。同じ本なら読了にします";
-      // 4. 上下巻・I/II の片方を読んだ記録と、まとめて1件にしている本
-      if (!cands.length) {
-        const base = blVolPart(x.t);
-        if (base && base.length >= 3) {
-          const k = Lib.sameKey(base);
-          cands = Object.values(Lib.items()).filter(it => own(it) && it.kind !== "series" && !/全\d+巻|セット/.test(it.t) && Lib.sameKey(blBase(it.t)) === k && !said(it).has(key)
-            && Lib.authorMatch(x.a, it.a));
-          why = "ブクログに、この本の一部の巻（上下巻の片方など）の読了記録があります。読了にしますか";
-        }
-      }
-      if (!cands.length) continue;
-      Lib.qAdd("blread", cands[0].id, { why, blk: key, bl: x.id, bt: x.t, ba: x.a, bd: x.d, cands: cands.map(c => c.id) });
-      asked.add(key); ask++;
-    }
-  } catch (e) { Lib.batchDiscard(); console.error(e); return; }
-  if (auto || ask) { Lib.batchCommit(); UI.toast(`ブクログの読了記録を蔵書と突き合わせました：読了にした本 ${auto}冊${ask ? `・確認待ち ${ask}件` : ""}`, 6000); }
-  else Lib.batchDiscard();
-}
-// 確認待ち「ブクログの読了記録」への答え。into：同じ本だった記録（無ければ、どれも違う）
-function answerBlread(qid, into) {
-  const q = Lib.queue()[qid]; if (!q) return;
-  const x = booklogItems().find(y => y.id === q.bl) || { id: q.bl, t: q.bt, a: q.ba, d: q.bd };
-  if (into) {
-    const it = JSON.parse(JSON.stringify(Lib.get(into)));
-    it.blks = [...new Set([...(it.blks || []), x.id])].filter(b => b !== it.blk); if (!it.blks.length) delete it.blks;
-    it.blkKeys = [...new Set([...(it.blkKeys || []), q.blk])].filter(b => b !== it.blkKey); if (!it.blkKeys.length) delete it.blkKeys;
-    markBooklogRead(it, null, x.d);
-  } else {
-    for (const id of q.cands || [q.target]) { const it0 = Lib.get(id); if (!it0) continue; const it = JSON.parse(JSON.stringify(it0)); it.blkNo = [...new Set([].concat(it.blkNo || [], q.blk))]; Lib.put(it); }
-  }
-  Lib.qDel(qid);
 }
 // 前の版でブクログから登録した本の手直しを一度だけ行う：未読のままなら読了に、種類が決まっていなければカテゴリから決める
 function fixBooklogRead() {

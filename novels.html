@@ -248,7 +248,7 @@ button.when{font:inherit;font-size:12px;background:none;border:0;padding:0;color
 @media (prefers-reduced-motion:reduce){.bar i{transition:none}}
 .sortdir{white-space:nowrap}
 </style><style>[hidden]{display:none!important}</style>
-<link rel="stylesheet" href="app/bar.css?v=202610240256">
+<link rel="stylesheet" href="app/bar.css?v=202610241356">
 <div id="shelfBar" class="shelfbar"><div class="sb-in"><a class="sb-brand" href="index.html">shelf</a><nav aria-label="画面"><a href="index.html">ホーム</a><a href="library.html">蔵書</a><a href="novels.html" aria-current="page">必読書</a><a href="films.html">映画</a></nav><span id="shelfSync" class="sb-sync" role="status">…</span></div></div>
 <p id="shelfMsg" class="shelfmsg" hidden></p>
 
@@ -432,11 +432,11 @@ button.when{font:inherit;font-size:12px;background:none;border:0;padding:0;color
 
 
 
-<script src="app/store.js?v=202610240256"></script>
+<script src="app/store.js?v=202610241356"></script>
 <script>
 "use strict";
 (async () => {
-  const CFG = {"title": "必読書チェッカー — shelf", "works": "works/novels.json", "need": ["works/novels.json", "works/novels-biblio.json", "records/novels-checker/", "records/library/"], "docs": {"books": "records/novels-checker/books.json", "custom": "records/novels-checker/custom.json", "log": "records/novels-checker/log.json"}, "logchunks": "records/novels-checker/log-{n}.json", "code": "app/legacy-novels.js?v=202610240256"};
+  const CFG = {"title": "必読書チェッカー — shelf", "works": "works/novels.json", "need": ["works/novels.json", "works/novels-biblio.json", "records/novels-checker/", "records/library/"], "docs": {"books": "records/novels-checker/books.json", "custom": "records/novels-checker/custom.json", "log": "records/novels-checker/log.json"}, "logchunks": "records/novels-checker/log-{n}.json", "code": "app/legacy-novels.js?v=202610241356"};
   const bar = document.getElementById("shelfBar");
   const msg = t => { const el = document.getElementById("shelfMsg"); if (el) { el.textContent = t; el.hidden = !t; } };
   // 保存の状態
