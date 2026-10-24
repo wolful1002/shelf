@@ -9,8 +9,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app/ui.css?v=202610231658">
-<link rel="stylesheet" href="app/bar.css?v=202610231658">
+<link rel="stylesheet" href="app/ui.css?v=202610240219">
+<link rel="stylesheet" href="app/bar.css?v=202610240219">
 <style>
 .phthumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .phthumbs figure{margin:0;display:grid;gap:4px;justify-items:center}
@@ -139,9 +139,10 @@
     <div class="row">
       <input type="search" id="q" class="grow" placeholder="書名・著者・出版社・ISBN・保管場所" aria-label="検索">
       <select id="sort" aria-label="並び順">
-        <option value="added">登録が新しい順</option><option value="title">書名順</option><option value="author">著者順</option>
+        <option value="added">登録順</option><option value="title">書名順</option><option value="author">著者順</option>
         <option value="pub">出版社順</option><option value="loc">保管場所順</option><option value="year">刊行年順</option>
       </select>
+      <button type="button" id="sortDir" class="small quiet" style="white-space:nowrap" aria-label="並びの向きを切り替える" title="押すと昇順と降順が切り替わります">↓ 昇順</button>
     </div>
     <div class="row">
       <select id="fCat" aria-label="種類"></select>
@@ -227,13 +228,13 @@
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-<script src="app/store.js?v=202610231658"></script>
-<script src="app/biblio.js?v=202610231658"></script>
-<script src="app/scan.js?v=202610231658"></script>
-<script src="app/ui.js?v=202610231658"></script>
-<script src="app/lib.js?v=202610231658"></script>
-<script src="app/fixes.js?v=202610231658"></script>
-<script src="app/library.js?v=202610231658"></script>
-<script src="app/photos.js?v=202610231658"></script>
+<script src="app/store.js?v=202610240219"></script>
+<script src="app/biblio.js?v=202610240219"></script>
+<script src="app/scan.js?v=202610240219"></script>
+<script src="app/ui.js?v=202610240219"></script>
+<script src="app/lib.js?v=202610240219"></script>
+<script src="app/fixes.js?v=202610240219"></script>
+<script src="app/library.js?v=202610240219"></script>
+<script src="app/photos.js?v=202610240219"></script>
 </body>
 </html>

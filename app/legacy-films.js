@@ -385,6 +385,7 @@ function buildControls(){
   ls.addEventListener("change", e=>{ state.list=e.target.value; state.shown=PAGE; renderList() });
   $("decade").addEventListener("change", e=>{ state.decade=e.target.value; state.shown=PAGE; renderList() });
   $("sort").addEventListener("change", e=>{ sortBefore(); state.sort=e.target.value; state.shown=PAGE; sortAfter(); renderList() });
+  $("sortDir").addEventListener("click", ()=>{ sortBefore(); state.desc = !state.desc; state.shown=PAGE; sortAfter(); syncSortDir(); renderList() });
   $("backBtn").addEventListener("click", popView);
   document.addEventListener("keydown", e=>{ if(e.key === "Escape" && viewStack.length && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) popView() });
   for(const [id,v] of WATCH_BTNS){
@@ -442,9 +443,10 @@ function buildControls(){
 const WATCH_BTNS = [["fAll","all"],["fTodo","todo"],["fDone","done"],["fWant","want"]];
 function syncWatchBtns(){ for(const [b,v] of WATCH_BTNS) $(b).setAttribute("aria-pressed", state.watch===v) }
 // put every control back in line with state (used when a view is restored)
+function syncSortDir(){ const b = $("sortDir"); if(!b) return; b.textContent = state.desc ? "↑ 降順" : "↓ 昇順"; b.setAttribute("aria-pressed", !!state.desc); }
 function syncControls(){
   $("q").value = state.q; $("list").value = state.list; $("decade").value = state.decade; $("country").value = state.country;
-  $("jpf").value = state.jp; $("rec").value = state.rec; $("sort").value = state.sort; syncWatchBtns();
+  $("jpf").value = state.jp; $("rec").value = state.rec; $("sort").value = state.sort; syncWatchBtns(); syncSortDir();
 }
 // open a film from elsewhere on the page (same-director list, today's pick); one click on the back button returns
 function navigate(k, fromK){
@@ -509,6 +511,8 @@ function filtered(){
   else if(state.sort==="country") out = out.slice().sort((a,b)=>(!a.c)-(!b.c) || COL.compare(ctryKey(a),ctryKey(b)) || a.id-b.id);
   else if(state.sort==="yeard") out = out.slice().sort((a,b)=>b.y-a.y || a.id-b.id);
   else if(state.list && state.list!=="b1001" && state.list!=="bfi_jp") out = out.slice().sort((a,b)=>a.s[state.list]-b.s[state.list] || a.id-b.id);
+  // 降順：今の並びをそのまま逆にする（優先度順なら低い順、年順なら新しい順）
+  if(state.desc) out = out.slice().reverse();
   return out;
 }
 

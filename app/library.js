@@ -213,11 +213,14 @@ $("mSave").onclick = async () => {
 };
 
 // ---------- 一覧 ----------
-let LST = { q: "", sort: "added", cat: "", media: "", loc: "", read: "", link: "", group: true }, shown = 100;
+let LST = { q: "", sort: "added", desc: true, cat: "", media: "", loc: "", read: "", link: "", group: true }, shown = 100;
 const stack = [];
-function syncListControls() { $("q").value = LST.q; $("sort").value = LST.sort; $("fCat").value = LST.cat; $("fMedia").value = LST.media; $("fLoc").value = LST.loc; $("fRead").value = LST.read; $("fLink").value = LST.link; $("fGroup").checked = LST.group !== false; $("backBtn").hidden = !stack.length || location.hash !== "#list"; }
+function syncListControls() { $("q").value = LST.q; $("sort").value = LST.sort; $("fCat").value = LST.cat; $("fMedia").value = LST.media; $("fLoc").value = LST.loc; $("fRead").value = LST.read; $("fLink").value = LST.link; $("sortDir").textContent = LST.desc ? "↑ 降順" : "↓ 昇順"; $("sortDir").setAttribute("aria-pressed", !!LST.desc); $("fGroup").checked = LST.group !== false; $("backBtn").hidden = !stack.length || location.hash !== "#list"; }
 for (const [id, key] of [["q", "q"], ["sort", "sort"], ["fCat", "cat"], ["fMedia", "media"], ["fLoc", "loc"], ["fRead", "read"], ["fLink", "link"]])
   $(id).addEventListener(id === "q" ? "input" : "change", () => { LST[key] = $(id).value; shown = 100; renderList(); });
+$("sortDir").addEventListener("click", () => { LST.desc = !LST.desc; shown = 100; renderList(); });
+// 並びを変えたら、ふつうの向きに戻す（登録順・刊行年順は新しい順、ほかは あいうえお順）
+$("sort").addEventListener("change", () => { LST.desc = LST.sort === "added" || LST.sort === "year"; renderList(); });
 $("fGroup").addEventListener("change", () => { LST.group = $("fGroup").checked; shown = 100; renderList(); });
 $("backBtn").onclick = () => { const s = stack.pop(); if (s) { LST = s; shown = 100; renderList(); } };
 function pushState(patch) { stack.push({ ...LST }); Object.assign(LST, patch); shown = 100; renderList(); window.scrollTo(0, 0); }
@@ -232,8 +235,10 @@ function listRows() {
   if (LST.loc) rows = rows.filter(it => (it.loc || "") === (LST.loc === "-" ? "" : LST.loc));
   if (LST.read && LST.read !== "want") rows = rows.filter(it => LST.read === "read" ? Lib.isRead(it) : !Lib.isRead(it));
   if (LST.link) rows = rows.filter(it => LST.link === "yes" ? !!it.nk : LST.link === "wait" ? it.link === "wait" : !it.nk && it.link !== "wait");
-  const k = { title: it => Biblio.norm(it.t), author: it => Biblio.norm(it.a), pub: it => Biblio.norm(it.pub), loc: it => it.loc || "￿", year: it => it.y || 9999, added: it => -(Date.parse(it.added) || 0) }[LST.sort];
-  rows.sort((a, b) => { const x = k(a), y = k(b); return x < y ? -1 : x > y ? 1 : 0; });
+  const k = { title: it => Biblio.norm(it.t), author: it => Biblio.norm(it.a), pub: it => Biblio.norm(it.pub), loc: it => it.loc || "", year: it => it.y || 0, added: it => Date.parse(it.added) || 0 }[LST.sort];
+  // 昇順・降順を切り替える。値の無い本（出版社・場所・刊行年が空）は、どちらの向きでも最後に置く
+  const dir = LST.desc ? -1 : 1, empty = v => v === "" || v === 0;
+  rows.sort((a, b) => { const x = k(a), y = k(b); if (empty(x) !== empty(y)) return empty(x) ? 1 : -1; return (x < y ? -1 : x > y ? 1 : 0) * dir; });
   return rows;
 }
 function renderList() {
@@ -354,7 +359,7 @@ $("list").addEventListener("click", e => {
   const g = e.target.closest("[data-srg]"); if (g) { const k = g.dataset.srg; if (srOpen.has(k)) srOpen.delete(k); else srOpen.add(k); renderList(); return; }
   const o = e.target.closest("[data-open]"); if (o) { openDetail(o.dataset.open); return; }
   const c = e.target.closest("[data-by]");
-  if (c) { const by = c.dataset.by, v = c.dataset.v; pushState(by === "loc" ? { loc: v, q: "", sort: "title" } : by === "series" ? { q: v, sort: "title", group: false } : { q: v, sort: by === "author" ? "year" : "title" }); }
+  if (c) { const by = c.dataset.by, v = c.dataset.v; pushState(by === "loc" ? { loc: v, q: "", sort: "title", desc: false } : by === "series" ? { q: v, sort: "title", desc: false, group: false } : { q: v, sort: by === "author" ? "year" : "title", desc: false }); }
 });
 
 // ---------- 作品のシリーズ（副題つきの巻） ----------

@@ -253,6 +253,7 @@ function buildControls(){
   $("pTier").innerHTML = `<option value="">優先度：すべて</option>` + TIERS.map(t=>`<option value="${t.id}">${t.nm}</option>`).join("");
   let qTimer = null;
   $("q").addEventListener("input", e=>{ clearTimeout(qTimer); qTimer = setTimeout(()=>{ st.q = e.target.value.trim().toLowerCase(); keepPlace() }, 250) });
+  $("sortDir").addEventListener("click", ()=>{ sortBefore(); st.desc = !st.desc; sortAfter(); syncSortDir(); renderList(true); });
   for(const [id,key] of [["list","list"],["cty","cty"],["era","era"],["tr","tr"],["kd","kd"],["gn","gn"],["sort","sort"]])
     $(id).addEventListener("change", e=>{
       if(key!=="sort"){ st[key] = e.target.value; keepPlace(); return }
@@ -375,6 +376,8 @@ function filtered(){
   else if(st.sort==="tyear") out.sort((a,b)=>tyKey(a)-tyKey(b) || (a.jy||0)-(b.jy||0) || a.id-b.id);
   else if(st.sort==="publisher") out.sort((a,b)=>pubKey(a).localeCompare(pubKey(b),"ja") || a.id-b.id);
   else if(st.list && L[st.list].ranked) out.sort((a,b)=>a.s[st.list]-b.s[st.list] || a.id-b.id);
+  // 降順：今の並びをそのまま逆にする（優先度順なら低い順、年順なら新しい順）
+  if(st.desc) out.reverse();
   return out;
 }
 
@@ -543,9 +546,10 @@ function popView(){
   place();
   requestAnimationFrame(()=>{ place(); focusRow(v.k, false); setTimeout(place, 120) });
 }
+function syncSortDir(){ const b = $("sortDir"); if(!b) return; b.textContent = st.desc ? "↑ 降順" : "↓ 昇順"; b.setAttribute("aria-pressed", !!st.desc); }
 function syncControls(){
   for(const [id,key] of [["list","list"],["cty","cty"],["era","era"],["tr","tr"],["kd","kd"],["gn","gn"],["sort","sort"]]) $(id).value = st[key];
-  $("q").value = st.q;
+  $("q").value = st.q; syncSortDir();
   [["fAll","all"],["fTodo","todo"],["fWant","want"],["fDone","done"],["fOwn","own"],["fTsun","tsundoku"]].forEach(([b,v])=>$(b).setAttribute("aria-pressed", st.status===v));
 }
 // rows are rendered in batches as the reader scrolls, so long lists stay light
