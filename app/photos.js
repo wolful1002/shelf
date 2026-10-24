@@ -38,7 +38,17 @@ function phPlaces() {
 $("phPlace").onchange = () => { $("phNewWrap").hidden = $("phPlace").value !== "__new"; phSync(); };
 $("phNewPlace").oninput = phSync;
 function phPlaceName() { return $("phPlace").value === "__new" ? $("phNewPlace").value.trim() : $("phPlace").value; }
-function phSync() { $("phSend").disabled = !PH.files.length || !phPlaceName(); $("phSend").textContent = PH.files.length ? `この棚の写真（${PH.files.length}枚）を取っておく` : "この棚の写真を取っておく"; }
+// 同じ棚を前に送ってあれば、その束に写真を足せる（足した写真だけをあとで読み取る）
+function phAddTarget() { const place = phPlaceName(); return place && $("phPlace").value !== "__new" ? PH.batches.find(b => b.place === place) || null : null; }
+function phSync() {
+  const t = phAddTarget();
+  $("phAddWrap").hidden = !t;
+  if (t) $("phAddLbl").textContent = `前に送った「${t.place}」の写真（${t.at.slice(5, 10).replace("-", "月")}日・${t.photos.length}枚）に足す`;
+  const add = t && $("phAdd").checked, n = PH.files.length;
+  $("phSend").disabled = !n || !phPlaceName();
+  $("phSend").textContent = add ? (n ? `この棚に写真（${n}枚）を足す` : "この棚に写真を足す") : n ? `この棚の写真（${n}枚）を取っておく` : "この棚の写真を取っておく";
+}
+$("phAdd").onchange = phSync;
 // 端末にあと何枚取っておけるか（1枚およそ1.5MBとして、端末の空きから見積もる。余裕として30MBは残す）。分からないときは null
 const PER_PHOTO = 1.5e6;
 async function phRoom() {
@@ -102,10 +112,12 @@ $("phSend").onclick = async () => {
       $("phMsg").textContent = `写真を整えています（${i + 1}/${files.length}）…`;
       await HELD.putPic(id, i, await bufOfBlob(await shrink(files[i])));
     }
-    await HELD.put({ id, place, at: new Date().toISOString(), n: files.length, sent: 0 });
+    const t = phAddTarget(), to = t && $("phAdd").checked ? t.dir : null;
+    await HELD.put({ id, place, at: new Date().toISOString(), n: files.length, sent: 0, ...(to ? { to } : {}) });
     PH.files.forEach(x => URL.revokeObjectURL(x.url)); PH.files = []; addFiles([]);
     $("phPlace").value = ""; $("phNewPlace").value = ""; $("phNewWrap").hidden = true; phSync();
-    $("phMsg").textContent = `「${place}」の写真（${files.length}枚）を取っておきました。次の棚を選んで撮ってください。`;
+    $("phAdd").checked = true; phSync();
+    $("phMsg").textContent = to ? `「${place}」に足す写真（${files.length}枚）を取っておきました。` : `「${place}」の写真（${files.length}枚）を取っておきました。次の棚を選んで撮ってください。`;
     phHeldShow(); phUpload();
   } catch (e) {
     await HELD.del(id).catch(() => {});
@@ -117,7 +129,7 @@ async function phHeldShow() {
   const list = await HELD.all().catch(() => []);
   PH.heldN = list.reduce((k, x) => k + x.n - (x.sent || 0), 0); phCapShow();
   $("phHeldBox").hidden = !list.length;
-  $("phHeld").innerHTML = list.sort((a, b) => a.id < b.id ? -1 : 1).map(x => `<li><div class="grow"><div class="t">${esc(x.place)}</div><div class="m"><span>${x.n}枚</span><span class="pill ${x.err ? "warn" : ""}">${x.err ? "送れていません（あとで送り直します）" : PH.sending === x.id ? `送っています（${x.sent}/${x.n}）` : "送る順番を待っています"}</span></div></div>${PH.sending === x.id ? "" : `<button type="button" class="small quiet" data-phheld="${esc(x.id)}">取りやめる</button>`}</li>`).join("");
+  $("phHeld").innerHTML = list.sort((a, b) => a.id < b.id ? -1 : 1).map(x => `<li><div class="grow"><div class="t">${esc(x.place)}</div><div class="m"><span>${x.n}枚${x.to ? "（前の写真に足す）" : ""}</span><span class="pill ${x.err ? "warn" : ""}">${x.err ? "送れていません（あとで送り直します）" : PH.sending === x.id ? `送っています（${x.sent}/${x.n}）` : "送る順番を待っています"}</span></div></div>${PH.sending === x.id ? "" : `<button type="button" class="small quiet" data-phheld="${esc(x.id)}">取りやめる</button>`}</li>`).join("");
 }
 $("phHeld").onclick = async e => {
   const b = e.target.closest("[data-phheld]"); if (!b || PH.sending === b.dataset.phheld) return;
@@ -133,15 +145,30 @@ async function phUpload() {
       const x = list.find(y => !y.err) || null;
       if (!x) break;
       PH.sending = x.id; phHeldShow();
-      const base = `${PH.dir}/${x.id}`;
+      const base = `${PH.dir}/${x.to || x.id}`;
       try {
+        // 前に送った束に足すときは、その束の続きの番号で送る（番号は最初に一度だけ決めて覚えておく。送り直しても同じ番号になる）
+        if (x.to && x.start == null) {
+          const b = await Shelf.readRemote(`${base}/batch.json`, PB);
+          if (!b) throw new Error("足す先の棚の写真が見つかりません");
+          x.start = Math.max(b.photos.length, ...b.photos.map(p => parseInt(p) || 0)); await HELD.put(x);
+        }
+        const k0 = x.start || 0, names = Array.from({ length: x.n }, (_, i) => `${k0 + i + 1}.jpg`);
         for (let i = x.sent; i < x.n; i++) {
           const buf = await HELD.pic(x.id, i); if (!buf) throw new Error(`${i + 1}枚目の写真が端末に見つかりません`);
-          await Shelf.putRaw(`${base}/${i + 1}.jpg`, b64ofBuf(buf), `本棚の写真：${x.place}（${i + 1}枚目）`, PB);
+          await Shelf.putRaw(`${base}/${names[i]}`, b64ofBuf(buf), `本棚の写真：${x.place}（${names[i]}${x.to ? "・足した写真" : ""}）`, PB);
           x.sent = i + 1; await HELD.put(x); phHeldShow();
         }
-        const batch = { id: x.id, place: x.place, at: x.at, device: Shelf.deviceName(), photos: Array.from({ length: x.n }, (_, i) => `${i + 1}.jpg`), status: "new" };
-        await Shelf.putRaw(`${base}/batch.json`, b64ofText(JSON.stringify(batch)), `本棚の写真：${x.place}（${x.n}枚）`, PB);
+        let batch;
+        if (x.to) {
+          const b = await Shelf.readRemote(`${base}/batch.json`, PB);
+          if (!b) throw new Error("足す先の棚の写真が見つかりません");
+          batch = { ...b, photos: [...b.photos, ...names.filter(p => !b.photos.includes(p))] };
+          // まだ一度も読み取っていない束は、全部まとめて読めばよい。読み取り済みの束は、足した写真だけを読み取り待ちにする
+          if (b.status !== "new" || b.unread) { batch.unread = [...(b.unread || []), ...names.filter(p => !(b.unread || []).includes(p))]; batch.addedAt = new Date().toISOString(); }
+          batch.status = "new";
+        } else batch = { id: x.id, place: x.place, at: x.at, device: Shelf.deviceName(), photos: names, status: "new" };
+        await Shelf.putRaw(`${base}/batch.json`, b64ofText(JSON.stringify(batch)), `本棚の写真：${x.place}（${x.to ? `${x.n}枚を足した` : `${x.n}枚`}）`, PB);
         await HELD.del(x.id);
         phLoad();
       } catch (e) { x.err = e.message; await HELD.put(x); }
@@ -163,14 +190,24 @@ async function phLoad() {
       return b ? { ...b, dir: d } : null;
     }))).filter(Boolean);
   } catch (e) { $("phBatches").innerHTML = `<li class="empty">読み込めませんでした：${esc(e.message)}</li>`; return; }
-  $("phBatches").innerHTML = PH.batches.map(b => `<li><div><div class="t">${esc(b.place)}</div><div class="m"><span>${esc(b.at.slice(0, 16).replace("T", " "))}</span><span>${b.photos.length}枚</span><span class="pill ${ST[b.status]?.[0] || ""}">${esc(ST[b.status]?.[1] || b.status)}</span>${b.result ? `<span>${esc(b.result)}</span>` : ""}</div></div>${b.status === "read" || b.status === "part" ? `<button type="button" class="small pri" data-phopen="${esc(b.dir)}">確かめる</button>` : b.status === "done" ? `<button type="button" class="small quiet" data-phopen="${esc(b.dir)}">見る・直す</button>` : ""}</li>`).join("") || `<li class="empty">まだ送った写真はありません</li>`;
+  $("phBatches").innerHTML = PH.batches.map(b => `<li><div><div class="t">${esc(b.place)}</div><div class="m"><span>${esc(b.at.slice(0, 16).replace("T", " "))}</span><span>${b.photos.length}枚</span><span class="pill ${ST[b.status]?.[0] || ""}">${esc(b.unread?.length ? `足した${b.unread.length}枚が読み取り待ち` : ST[b.status]?.[1] || b.status)}</span>${b.result ? `<span>${esc(b.result)}</span>` : ""}</div></div><div class="row">${b.status === "read" || b.status === "part" ? `<button type="button" class="small pri" data-phopen="${esc(b.dir)}">確かめる</button>` : b.status === "done" || b.unread?.length ? `<button type="button" class="small quiet" data-phopen="${esc(b.dir)}">見る・直す</button>` : ""}<button type="button" class="small quiet" data-phadd="${esc(b.dir)}">写真を足す</button></div></li>`).join("") || `<li class="empty">まだ送った写真はありません</li>`;
   phTidy();
   const waiting = PH.batches.filter(b => b.status === "new").length;
+  phSync();
   $("phHint").hidden = !waiting;
   $("phHint").textContent = `読み取り待ちの棚が ${waiting} つあります。撮り終えたら、Claude との会話で「本棚の写真を読んで」と頼んでください。まとめて読み取ります。`;
 }
 $("phReload").onclick = phLoad;
-$("phBatches").onclick = e => { const b = e.target.closest("[data-phopen]"); if (b) phOpen(b.dataset.phopen); };
+$("phBatches").onclick = e => {
+  const b = e.target.closest("[data-phopen]"); if (b) return phOpen(b.dataset.phopen);
+  const a = e.target.closest("[data-phadd]"); if (!a) return;
+  const t = PH.batches.find(x => x.dir === a.dataset.phadd); if (!t) return;
+  phPlaces();
+  if (![...$("phPlace").options].some(o => o.value === t.place)) $("phPlace").insertBefore(new Option(t.place, t.place), $("phPlace").options[1]);
+  $("phPlace").value = t.place; $("phNewWrap").hidden = true; $("phAdd").checked = true; phSync();
+  $("phMsg").textContent = `「${t.place}」に足す写真を撮るか選んでください。足した写真だけをあとで読み取ります。`;
+  $("p-photos").scrollIntoView({ behavior: "smooth" });
+};
 
 // ---------- 候補を確かめる ----------
 async function photoUrl(path) {
@@ -207,7 +244,7 @@ async function phOpen(dir) {
   PHC = { batch: b, cand, items: cand.items.map((c, i) => {
     const m = phMatch(c);
     // 以前の版で登録した束は、登録済みの印が無い。蔵書で持っている本は登録済みとみなす
-    const done = c.done || (b.status !== "read" && m.owned ? { how: "had" } : null);
+    const done = c.done || (b.status !== "read" && b.status !== "new" && m.owned ? { how: "had" } : null);
     return { ...c, i, m, done, t0: c.t0 || c.t, vol0: c.vol0 !== undefined ? c.vol0 : c.vol, act: done ? null : (c.conf !== "low" && !m.cands ? "reg" : "later") };
   }) };
   // どこにある本か：同じ写真の中で、前後のはっきり読めた本の名前で示す
@@ -239,7 +276,8 @@ function phRender() {
   $("phReview").innerHTML = `<div class="row"><h3 class="grow">${esc(b.place)}・未確認 ${open.length}冊／全 ${PHC.items.length}冊</h3><button type="button" class="quiet small" id="phClose">閉じる</button></div>
     <p class="small muted">1冊ずつ「登録する」「登録しない（読み取り誤りなど）」「あとで決める」を選んで、下の「決めた内容を確定する」を押してください。持っている本は「登録する」で保管場所が「${esc(b.place)}」になります。書名や巻数を直すと「登録する」になります。確定した本は下の「確認済み」に移ります。</p>
     <div class="row phbulk"><span class="small">未確認の本をまとめて：</span><button type="button" class="small quiet" data-phall="reg">すべて登録する</button><button type="button" class="small quiet" data-phall="later">すべてあとで決める</button></div>
-    ${open.length ? group(open, true) : `<p class="small">この棚の本はすべて確認が終わりました。</p>`}
+    ${b.unread?.length ? `<p class="small notice">足した写真（${b.unread.map(p => parseInt(p) + "枚目").join("・")}）はまだ読み取っていません。Claude に「本棚の写真を読んで」と頼むと、足した写真の候補がここに加わります。</p>` : ""}
+    ${open.length ? group(open, true) : b.unread?.length ? "" : `<p class="small">この棚の本はすべて確認が終わりました。</p>`}
     <details><summary>候補にない本を足す</summary><div class="grid2" style="margin-top:8px"><label class="f">書名<input type="text" id="phAddT"></label><label class="f">著者<input type="text" id="phAddA"></label></div><div class="row" style="margin-top:6px"><label class="f" style="display:inline-flex;align-items:center;gap:4px">巻<input type="text" id="phAddV" style="width:4.5em"></label><button type="button" class="small" id="phAddBtn">足す</button></div></details>
     <div class="phbar"><span class="small" id="phSel"></span><button type="button" class="pri" id="phReg">決めた内容を確定する</button></div>
     <p class="small" id="phRegMsg"></p>
@@ -305,9 +343,15 @@ $("phReview").addEventListener("click", async e => {
 async function phSave(result) {
   const b = PHC.batch;
   const keep = ["photo", "pos", "t", "a", "vol", "t0", "vol0", "label", "cat", "conf", "note", "fixed", "added", "done"];
-  const cand = { ...PHC.cand, items: PHC.items.map(c => Object.fromEntries(keep.filter(k => c[k] !== undefined && c[k] !== null && c[k] !== false).map(k => [k, c[k]]))) };
-  const left = PHC.items.filter(c => !c.done).length;
-  const nb = { ...b, status: left ? "part" : "done", doneAt: new Date().toISOString(), result: [b.result, result].filter(Boolean).join("／") };
+  // 確かめている間に写真が足されたり、足した写真の候補が届いたりしていれば、それを消さずに残す
+  const fresh = await Shelf.readRemote(`${PH.dir}/${b.dir}/batch.json`, PB).catch(() => null);
+  const freshC = await Shelf.readRemote(`${PH.dir}/${b.dir}/candidates.json`, PB).catch(() => null);
+  const mine = new Set(PHC.items.map(c => c.photo));
+  const extra = (freshC?.items || []).filter(c => !mine.has(c.photo));
+  const cand = { ...PHC.cand, items: [...PHC.items.map(c => Object.fromEntries(keep.filter(k => c[k] !== undefined && c[k] !== null && c[k] !== false).map(k => [k, c[k]]))), ...extra] };
+  const left = PHC.items.filter(c => !c.done).length + extra.filter(c => !c.done).length;
+  const base = fresh ? { ...fresh, dir: b.dir } : b;
+  const nb = { ...base, status: base.unread?.length ? "new" : left ? "part" : "done", doneAt: new Date().toISOString(), result: [b.result, result].filter(Boolean).join("／") };
   delete nb.dir;
   b.status = nb.status; b.result = nb.result;
   try {
