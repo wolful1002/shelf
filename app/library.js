@@ -745,7 +745,11 @@ let blShown = 100, blRows = [];
 const blSel = new Set();
 const blSeen = () => Lib.settings().blSeen || {};
 function setBlSeen(fn) { const s = JSON.parse(JSON.stringify(Lib.settings())); s.blSeen = s.blSeen || {}; fn(s.blSeen); Shelf.writeDoc(Lib.P.settings, s); }
+// 確認待ち「ブクログの読了記録」で聞いている記録（蔵書の本と同じかどうか答えを待っている）。ここから登録すると二重になるので、登録できなくする
+const blAsked = () => new Set(Object.values(Lib.queue()).filter(q => q.type === "blread").map(q => q.blk));
+let blAskedNow = new Set();
 const blRow = x => {
+  if (blAskedNow.has(blKey(x))) return `<li class="seen" data-blrow="${x.id}"><span class="row" style="gap:10px;align-items:flex-start;flex:1;min-width:0"><input type="checkbox" disabled aria-label="確認待ちで聞いているので登録できません"><span style="min-width:0"><span class="t">${esc(x.t)}</span><br><span class="m">${esc(x.a)}・${esc(x.d)}・<span class="pill acc">確認待ちで聞いています</span></span></span></span><button type="button" class="small" data-blq="1">確認待ちで答える</button></li>`;
   const seen = !!blSeen()[blKey(x)], on = blSel.has(x.id);
   return `<li class="${seen ? "seen" : ""}${on ? " sel" : ""}" data-blrow="${x.id}"><label class="row" style="gap:10px;align-items:flex-start;flex:1;min-width:0"><input type="checkbox" data-bl="${x.id}"${on ? " checked" : ""}><span style="min-width:0"><span class="t">${esc(x.t)}</span><br><span class="m">${esc(x.a)}・${esc(x.d)}${x.type ? "・" + esc(x.type) : ""}${x.g ? "・" + esc(x.g) : ""}${seen ? "・確認済み" : ""}</span></span></label>${seen ? `<button type="button" class="small quiet" data-blunseen="${x.id}">未確認に戻す</button>` : "<span></span>"}</li>`;
 };
@@ -753,16 +757,18 @@ function renderBooklog() {
   const done = new Set(Object.values(Lib.items()).flatMap(it => [it.blk, ...(it.blks || [])]).filter(Boolean));
   const doneKey = new Set(Object.values(Lib.items()).flatMap(it => [it.blkKey, ...(it.blkKeys || [])]).filter(Boolean));
   const seen = blSeen(), showSeen = $("blShowSeen").checked;
+  blAskedNow = blAsked();
   const q = Biblio.norm($("blq").value);
   const all = booklogItems().filter(x => !done.has(x.id) && !doneKey.has(blKey(x)));
-  const nSeen = all.filter(x => seen[blKey(x)]).length;
+  const nSeen = all.filter(x => seen[blKey(x)] && !blAskedNow.has(blKey(x))).length;
   blRows = all.filter(x => showSeen || !seen[blKey(x)]);
   if (q) blRows = blRows.filter(x => Biblio.norm(x.t + " " + x.a).includes(q));
   // 並び順：ブクログに登録した日で。同じ日のものは記録の順のまま
   const so = $("blSort").value;
   if (so) { const ix = new Map(all.map((x, i) => [x.id, i])); const dir = so === "new" ? -1 : 1; blRows.sort((a, b) => ((a.d || "") < (b.d || "") ? -dir : (a.d || "") > (b.d || "") ? dir : ix.get(a.id) - ix.get(b.id))); }
-  for (const id of [...blSel]) if (!all.some(x => x.id === id)) blSel.delete(id);
-  $("blCount").textContent = `未確認 ${all.length - nSeen}件・確認済み（持っていない） ${nSeen}件${q ? `・絞り込み ${blRows.length}件` : ""}`;
+  for (const id of [...blSel]) if (!all.some(x => x.id === id && !blAskedNow.has(blKey(x)))) blSel.delete(id);
+  const nAsk = all.filter(x => blAskedNow.has(blKey(x))).length;
+  $("blCount").textContent = `未確認 ${all.length - nSeen - nAsk}件・確認待ちで聞いている ${nAsk}件・確認済み（持っていない） ${nSeen}件${q ? `・絞り込み ${blRows.length}件` : ""}`;
   $("blList").innerHTML = blRows.slice(0, blShown).map(blRow).join("") || `<li class="empty">${all.length ? "未確認の記録はありません。「確認済みも表示」で見直せます" : "登録できる記録はありません"}</li>`;
   $("blMore").hidden = blRows.length <= blShown;
   $("blResetSeen").hidden = !(showSeen && nSeen);
@@ -791,6 +797,7 @@ $("blList").addEventListener("change", e => {
   c.closest("li").classList.toggle("sel", c.checked); blBarSync();
 });
 $("blList").addEventListener("click", e => {
+  if (e.target.closest("[data-blq]")) { location.hash = "#queue"; return; }
   const b = e.target.closest("[data-blunseen]"); if (!b) return;
   const x = blRows.find(y => y.id === b.dataset.blunseen); if (!x) return;
   setBlSeen(m => { delete m[blKey(x)]; }); setTimeout(renderBooklog, 50);
@@ -806,12 +813,14 @@ let blBusy = false;
 $("blReg").onclick = async () => {
   if (blBusy) return;
   for (const c of document.querySelectorAll("[data-bl]")) { if (c.checked) blSel.add(c.dataset.bl); else blSel.delete(c.dataset.bl); }
+  blAskedNow = blAsked();
+  for (const x of booklogItems()) if (blSel.has(x.id) && blAskedNow.has(blKey(x))) blSel.delete(x.id);
   if (!blSel.size) { UI.toast("登録する本にチェックを付けてください"); return; }
   blBusy = true;
   const all = new Map(booklogItems().map(x => [x.id, x]));
   // いちばん下でチェックした本までの、チェックしなかった本を確認済みにする（今の表示の並びで）
   let last = -1; blRows.forEach((x, i) => { if (blSel.has(x.id)) last = i; });
-  const skip = blRows.slice(0, last + 1).filter(x => !blSel.has(x.id));
+  const skip = blRows.slice(0, last + 1).filter(x => !blSel.has(x.id) && !blAskedNow.has(blKey(x)));
   $("blReg").textContent = "登録しています…";
   let n = 0;
   for (const id of [...blSel]) {
