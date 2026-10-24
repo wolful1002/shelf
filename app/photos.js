@@ -8,7 +8,12 @@ const PB = "photos";
 // 写真の置き場がこの大きさを超えたら、確認が終わった棚の写真を消す（GitHub が勧める保管場所の大きさ 1GB を超えないように）
 const PHOTO_LIMIT = 600e6;
 const PH = { dir: "inbox/shelf", files: [], batches: [], open: null, urls: new Map() };
-const bufOfBlob = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsArrayBuffer(blob); });
+// 写真の中身を読む。読めないときは別の読み方でもう一度試し、それでもだめなら分かる言葉で知らせる
+const bufOfBlob = async blob => {
+  try { return await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error || new Error("読めませんでした")); r.readAsArrayBuffer(blob); }); }
+  catch (e) { if (typeof blob.arrayBuffer === "function") { try { return await blob.arrayBuffer(); } catch {} } throw new Error("写真の中身を読めませんでした" + (e?.name ? `：${e.name}` : "")); }
+};
+const newId = () => new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-") + "-" + Math.random().toString(36).slice(2, 5);
 const b64ofBuf = buf => { const b = new Uint8Array(buf); let x = ""; for (let i = 0; i < b.length; i += 0x8000) x += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(x); };
 const b64ofText = s => { const b = new TextEncoder().encode(s); let x = ""; for (let i = 0; i < b.length; i += 0x8000) x += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(x); };
 
@@ -45,7 +50,7 @@ function phSync() {
   $("phAddWrap").hidden = !t;
   if (t) $("phAddLbl").textContent = `前に送った「${t.place}」の写真（${t.at.slice(5, 10).replace("-", "月")}日・${t.photos.length}枚）に足す`;
   const add = t && $("phAdd").checked, n = PH.files.length;
-  $("phSend").disabled = !n || !phPlaceName();
+  $("phSend").disabled = !n || !phPlaceName() || !!PH.adding;
   $("phSend").textContent = add ? (n ? `この棚に写真（${n}枚）を足す` : "この棚に写真を足す") : n ? `この棚の写真（${n}枚）を取っておく` : "この棚の写真を取っておく";
 }
 $("phAdd").onchange = phSync;
@@ -55,23 +60,62 @@ async function phRoom() {
   try { const e = await navigator.storage?.estimate?.(); if (!e || !e.quota) return null; return Math.max(0, Math.floor((e.quota - (e.usage || 0) - 30e6) / PER_PHOTO)); } catch { return null; }
 }
 async function phCapShow() {
-  const room = await phRoom(), n = PH.files.length, held = PH.heldN || 0;
+  const room = await phRoom(), held = (PH.heldN || 0) + PH.files.length;
   const el = $("phCap");
-  if (room == null || (!n && !held)) { el.hidden = true; return; }
+  if (room == null || !held) { el.hidden = true; return; }
   el.hidden = false;
-  el.className = "small " + (n > room ? "notice" : "muted");
-  el.textContent = n > room
-    ? `端末の空きが足りません。あと約${room}枚しか取っておけません（選んだのは${n}枚）。送り終わるのを待つと空きが増えます。`
+  el.className = "small " + (room < 10 ? "notice" : "muted");
+  el.textContent = room < 10
+    ? `端末の空きが少なくなっています（あと約${room}枚）。送り終わるのを待つと空きが増えます。`
     : `端末にあと約${room}枚取っておけます。送り終えた写真は端末から消えるので、そのぶん空きが戻ります。`;
 }
-function addFiles(list) {
-  for (const f of list) PH.files.push({ f, url: URL.createObjectURL(f) });
+// 撮った・選んだ写真は、その場で縮めて端末にしまう（あとで送るときに元の写真が読めなくなっていることがあるため）。
+// しまった写真は「撮りかけの棚」として残るので、画面を閉じても次に開けば続きから撮れる
+function phThumbs() {
   $("phThumbs").innerHTML = PH.files.map((x, i) => `<figure><img src="${x.url}" alt="${i + 1}枚目"><button type="button" class="small quiet" data-phdel="${i}">外す</button></figure>`).join("");
   phSync(); phCapShow();
 }
-$("phCam").onchange = e => { addFiles(e.target.files); e.target.value = ""; };
-$("phPick").onchange = e => { addFiles(e.target.files); e.target.value = ""; };
-$("phThumbs").onclick = e => { const b = e.target.closest("[data-phdel]"); if (!b) return; const x = PH.files.splice(+b.dataset.phdel, 1)[0]; URL.revokeObjectURL(x.url); addFiles([]); };
+async function phDraftSave() {
+  if (!PH.draft) return;
+  if (!PH.files.length) { await HELD.del(PH.draft).catch(() => {}); PH.draft = null; return; }
+  await HELD.put({ id: PH.draft, draft: true, keys: PH.files.map(x => x.k), at: new Date().toISOString() });
+}
+async function addFiles(list) {
+  list = [...list]; if (!list.length) return;
+  PH.adding = (PH.adding || 0) + 1; phSync();
+  try { navigator.storage?.persist?.(); } catch {}
+  const bad = [];
+  try {
+    if (!PH.draft) { PH.draft = newId(); PH.nextK = 0; }
+    for (let j = 0; j < list.length; j++) {
+      $("phMsg").textContent = `写真を取り込んでいます（${j + 1}/${list.length}）…`;
+      const room = await phRoom();
+      if (room != null && room < 1) { $("phMsg").textContent = `端末の空きが足りないので、${list.length - j}枚を取り込めませんでした。送り終わるのを待つと空きが増えます。`; phThumbs(); return; }
+      const f = list[j], k = PH.nextK++;
+      try {
+        await HELD.putPic(PH.draft, k, await bufOfBlob(await shrink(f)));
+        PH.files.push({ k, url: URL.createObjectURL(f) });
+        await phDraftSave(); phThumbs();
+      } catch (e) { bad.push(`${j + 1}枚目（${e?.message || e}）`); }
+    }
+    $("phMsg").textContent = bad.length ? `取り込めなかった写真があります：${bad.join("・")}。その写真だけ撮り直すか、選び直してください。ほかの写真は取り込めています。` : "";
+  } finally { PH.adding--; phSync(); }
+}
+$("phCam").onchange = e => { const f = [...e.target.files]; e.target.value = ""; addFiles(f); };
+$("phPick").onchange = e => { const f = [...e.target.files]; e.target.value = ""; addFiles(f); };
+$("phThumbs").onclick = async e => {
+  const b = e.target.closest("[data-phdel]"); if (!b || PH.adding) return;
+  const x = PH.files.splice(+b.dataset.phdel, 1)[0]; URL.revokeObjectURL(x.url);
+  await HELD.delPic(PH.draft, x.k).catch(() => {}); await phDraftSave(); phThumbs();
+};
+// 前に撮りかけた棚を戻す
+async function phDraftLoad() {
+  const d = (await HELD.allRaw().catch(() => [])).find(x => x.draft); if (!d) return;
+  PH.draft = d.id; PH.nextK = Math.max(-1, ...d.keys) + 1; PH.files = [];
+  for (const k of d.keys) { const buf = await HELD.pic(d.id, k).catch(() => null); if (buf) PH.files.push({ k, url: URL.createObjectURL(new Blob([buf], { type: "image/jpeg" })) }); }
+  phThumbs();
+  if (PH.files.length) $("phMsg").textContent = `前に撮りかけた写真（${PH.files.length}枚）が残っています。棚を選んで続けてください。`;
+}
 
 // ---------- 撮った棚を端末に取っておき、後ろで順に送る ----------
 // 端末の中の置き場（IndexedDB「shelf-photos」）。棚の情報 held：{ id, place, at, n:枚数, sent:送り終えた枚数, err }。
@@ -90,37 +134,31 @@ const HELD = {
     const db = await this.open();
     return new Promise((res, rej) => { const t = db.transaction(store, mode); let out; const q = fn(t.objectStore(store)); if (q) q.onsuccess = () => { out = q.result; }; t.oncomplete = () => res(out); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error("端末にしまえませんでした（空き容量が足りない可能性があります）")); });
   },
-  all() { return this.run("held", "readonly", st => st.getAll()).then(x => x || []); },
+  allRaw() { return this.run("held", "readonly", st => st.getAll()).then(x => x || []); },
+  // 送る棚だけ（撮りかけの棚は除く）
+  all() { return this.allRaw().then(x => x.filter(y => !y.draft)); },
+  delPic(id, i) { return this.run("pics", "readwrite", st => st.delete(`${id}/${i}`)); },
   put(x) { return this.run("held", "readwrite", st => st.put(x)); },
   pic(id, i) { return this.run("pics", "readonly", st => st.get(`${id}/${i}`)); },
   putPic(id, i, buf) { return this.run("pics", "readwrite", st => st.put(buf, `${id}/${i}`)); },
   async del(id, n) { await this.run("held", "readwrite", st => st.delete(id)); await this.run("pics", "readwrite", st => st.delete(IDBKeyRange.bound(`${id}/`, `${id}/￿`))); },
 };
 $("phSend").onclick = async () => {
-  const place = phPlaceName(); if (!place || !PH.files.length) return;
+  const place = phPlaceName(); if (!place || !PH.files.length || PH.adding) return;
   if ($("phPlace").value === "__new") Lib.addPlace(place);
   $("phSend").disabled = true;
-  const id = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-") + "-" + Math.random().toString(36).slice(2, 5);
-  const files = PH.files.map(x => x.f);
-  const room = await phRoom();
-  if (room != null && files.length > room) { await phCapShow(); $("phMsg").textContent = `端末の空きが足りないので取っておけませんでした（あと約${room}枚分）。送り終わるのを待つか、枚数を減らしてください。`; phSync(); return; }
-  // 端末が空きを作るために写真を勝手に消さないよう頼む（断られても動きは同じ）
-  try { navigator.storage?.persist?.(); } catch {}
+  // 写真は取り込んだときに端末にしまってあるので、ここでは「この棚として送る」と印を付けるだけ
+  const id = PH.draft, keys = PH.files.map(x => x.k), n = keys.length;
   try {
-    // 1枚ずつ縮めて、すぐ端末にしまう（全部を同時にメモリに持たない）
-    for (let i = 0; i < files.length; i++) {
-      $("phMsg").textContent = `写真を整えています（${i + 1}/${files.length}）…`;
-      await HELD.putPic(id, i, await bufOfBlob(await shrink(files[i])));
-    }
     const t = phAddTarget(), to = t && $("phAdd").checked ? t.dir : null;
-    await HELD.put({ id, place, at: new Date().toISOString(), n: files.length, sent: 0, ...(to ? { to } : {}) });
-    PH.files.forEach(x => URL.revokeObjectURL(x.url)); PH.files = []; addFiles([]);
+    await HELD.put({ id, place, at: new Date().toISOString(), n, keys, sent: 0, ...(to ? { to } : {}) });
+    PH.files.forEach(x => URL.revokeObjectURL(x.url)); PH.files = []; PH.draft = null; phThumbs();
+    const files = { length: n };
     $("phPlace").value = ""; $("phNewPlace").value = ""; $("phNewWrap").hidden = true; phSync();
     $("phAdd").checked = true; phSync();
     $("phMsg").textContent = to ? `「${place}」に足す写真（${files.length}枚）を取っておきました。` : `「${place}」の写真（${files.length}枚）を取っておきました。次の棚を選んで撮ってください。`;
     phHeldShow(); phUpload();
   } catch (e) {
-    await HELD.del(id).catch(() => {});
     $("phMsg").textContent = `取っておけませんでした（${e?.message || e}）。写真は消えていないので、もう一度押してみてください。続けて出るときは、この文をそのまま Claude に伝えてください。`;
     phSync();
   }
@@ -155,7 +193,7 @@ async function phUpload() {
         }
         const k0 = x.start || 0, names = Array.from({ length: x.n }, (_, i) => `${k0 + i + 1}.jpg`);
         for (let i = x.sent; i < x.n; i++) {
-          const buf = await HELD.pic(x.id, i); if (!buf) throw new Error(`${i + 1}枚目の写真が端末に見つかりません`);
+          const buf = await HELD.pic(x.id, x.keys ? x.keys[i] : i); if (!buf) throw new Error(`${i + 1}枚目の写真が端末に見つかりません`);
           await Shelf.putRaw(`${base}/${names[i]}`, b64ofBuf(buf), `本棚の写真：${x.place}（${names[i]}${x.to ? "・足した写真" : ""}）`, PB);
           x.sent = i + 1; await HELD.put(x); phHeldShow();
         }
@@ -441,4 +479,4 @@ async function phTidy() {
   finally { PH.tidying = false; }
 }
 
-function renderPhotos() { phPlaces(); if (!PH.loaded) { PH.loaded = true; phLoad(); phHeldShow(); phRetry(); } }
+function renderPhotos() { phPlaces(); if (!PH.loaded) { PH.loaded = true; phLoad(); phHeldShow(); phRetry(); phDraftLoad(); } }

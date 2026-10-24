@@ -258,7 +258,7 @@ details.sources summary{cursor:pointer;font-weight:700}
 .toast button:focus-visible{outline:2px solid var(--accent)}
 .sortdir{white-space:nowrap}
 </style><style>[hidden]{display:none!important}</style>
-<link rel="stylesheet" href="app/bar.css?v=202610240250">
+<link rel="stylesheet" href="app/bar.css?v=202610240256">
 <div id="shelfBar" class="shelfbar"><div class="sb-in"><a class="sb-brand" href="index.html">shelf</a><nav aria-label="画面"><a href="index.html">ホーム</a><a href="library.html">蔵書</a><a href="novels.html">必読書</a><a href="films.html" aria-current="page">映画</a></nav><span id="shelfSync" class="sb-sync" role="status">…</span></div></div>
 <p id="shelfMsg" class="shelfmsg" hidden></p>
 
@@ -459,11 +459,11 @@ details.sources summary{cursor:pointer;font-weight:700}
 
 
 
-<script src="app/store.js?v=202610240250"></script>
+<script src="app/store.js?v=202610240256"></script>
 <script>
 "use strict";
 (async () => {
-  const CFG = {"title": "映画チェッカー — shelf", "works": "works/films.json", "need": ["works/films.json", "records/films-checker/"], "docs": {"watched": "records/films-checker/watched.json", "offlist": "records/films-checker/offlist.json", "customLists": "records/films-checker/customLists.json"}, "code": "app/legacy-films.js?v=202610240250"};
+  const CFG = {"title": "映画チェッカー — shelf", "works": "works/films.json", "need": ["works/films.json", "records/films-checker/"], "docs": {"watched": "records/films-checker/watched.json", "offlist": "records/films-checker/offlist.json", "customLists": "records/films-checker/customLists.json"}, "code": "app/legacy-films.js?v=202610240256"};
   const bar = document.getElementById("shelfBar");
   const msg = t => { const el = document.getElementById("shelfMsg"); if (el) { el.textContent = t; el.hidden = !t; } };
   // 保存の状態
