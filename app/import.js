@@ -112,6 +112,7 @@ function buildRows(D, bibs) {
     rows.push({ src: "kosho", raw: x.t, inp: { t: cleanTitle(t), media: "paper", src: "purchase", buy: { shop: `日本の古本屋（${x.shop}）`, d: x.d }, cond: ["古書", note].filter(Boolean).join("・"), bulk: true }, extra: {} });
   }
   // honto：同じ本を何度か買ったものは1冊にまとめ、確認待ちに出す。「2巻セット」は巻をそろえる
+  for (const x of D.honto?.excluded || []) excluded.push({ src: "honto", t: `${x.t}（${x.d}）`, why: x.why });
   for (const x of D.honto?.items || []) {
     if (NOT_BOOK.test(x.t)) { excluded.push({ src: "honto", t: x.t, why: "本ではない品" }); continue; }
     let t = nfkc(x.t), vols = null;
@@ -214,7 +215,7 @@ function render() {
     <div class="tbl"><table><thead><tr><th>取得元</th><th>件数</th>${st.map(s => `<th>${esc(STATUS[s])}</th>`).join("")}<th>うち空欄を埋めた</th><th>登録しない</th></tr></thead>
     <tbody>${srcs.map(s => `<tr><th>${esc(SRCNAME[s])}</th><td>${res.filter(r => r.src === s).length + (exc[s] || 0)}</td>${st.map(x => `<td>${cnt[s]?.[x] || ""}</td>`).join("")}<td>${cnt[s]?.filled || ""}</td><td>${exc[s] || ""}</td></tr>`).join("")}</tbody></table></div>`;
   // 確認待ち（今回増える分）
-  const QN = { link: "チェッカーとの結び付け", same: "同じ本かどうか", dupbuy: "2回以上買った本", read: "読了の候補", cat: "本の種類", bib: "書誌が見つからない本", check: "書誌の確認" };
+  const QN = { link: "チェッカーとの結び付け", same: "同じ本かどうか", dupbuy: "2回以上買った本", read: "読了の候補", cat: "本の種類", bib: "書誌が見つからない本", check: "書誌の確認", series: "シリーズかどうか" };
   const byType = {}; for (const q of after.queue) { if (Object.values(Lib.queue()).some(o => o.type === q.type && o.target === q.target)) continue; (byType[q.type] = byType[q.type] || []).push(q); }
   $("queue").innerHTML = Object.entries(byType).map(([t, list]) => `<details${list.length <= 30 ? " open" : ""}><summary><b>${esc(QN[t] || t)}</b> ${list.length}件</summary><ul class="plain">${list.map(q => { const it = after.items[q.target]; return `<li><b>${esc(it?.t || "")}</b> <span class="small muted">${esc(it?.a || "")}・${esc(q.why || "")}</span></li>`; }).join("")}</ul></details>`).join("") || `<p class="muted">新しく増える確認待ちはありません</p>`;
   $("excluded").innerHTML = excluded.length ? `<ul class="plain">${excluded.map(x => `<li>${esc(SRCNAME[x.src])}：${esc(x.t)} <span class="small muted">${esc(x.why)}</span></li>`).join("")}</ul>` : `<p class="muted">ありません</p>`;
