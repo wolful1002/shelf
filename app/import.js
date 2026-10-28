@@ -4,15 +4,27 @@
 "use strict";
 const { $, esc } = UI;
 UI.topbar("");
-const DIR = "import/2026-10-23/";
-const SOURCES = [
-  ["kindle", "kindle.json", "Kindle"],
-  ["amazon", "amazon-orders.json", "Amazon（紙）"],
-  ["rakuten", "rakuten-orders.json", "楽天"],
-  ["vb", "valuebooks-orders.json", "バリューブックス"],
-  ["kosho", "kosho-orders.json", "日本の古本屋"],
-  ["wish", "amazon-wishlist.json", "欲しいものリスト"],
-];
+// どの日の取り込みか：import.html?d=2026-10-28 のように選ぶ（無ければ最初の 2026-10-23）
+const IMPORTS = {
+  "2026-10-23": {
+    sources: [
+      ["kindle", "kindle.json", "Kindle"],
+      ["amazon", "amazon-orders.json", "Amazon（紙）"],
+      ["rakuten", "rakuten-orders.json", "楽天"],
+      ["vb", "valuebooks-orders.json", "バリューブックス"],
+      ["kosho", "kosho-orders.json", "日本の古本屋"],
+      ["wish", "amazon-wishlist.json", "欲しいものリスト"],
+    ],
+    lead: "Kindle・Amazon・楽天・バリューブックス・日本の古本屋の購入履歴と、Amazonの欲しいものリストから、蔵書に登録する案です。",
+  },
+  "2026-10-28": {
+    sources: [["honto", "honto.json", "honto（丸善・ジュンク堂など）"]],
+    lead: "hontoの購入履歴（hontoカードを出して丸善・ジュンク堂などの店で買った本を含む）とMy本棚から、蔵書に登録する案です。",
+  },
+};
+const DAY = IMPORTS[new URLSearchParams(location.search).get("d")] ? new URLSearchParams(location.search).get("d") : "2026-10-23";
+const DIR = `import/${DAY}/`;
+const SOURCES = IMPORTS[DAY].sources;
 const SRCNAME = Object.fromEntries(SOURCES.map(([k, , n]) => [k, n]));
 
 // ---------- 書名の整え方 ----------
@@ -99,6 +111,19 @@ function buildRows(D, bibs) {
     const sm = t.match(/\s*(上下\s*\d+\s*冊揃い|全\s*\d+\s*冊)/); if (sm) { note = sm[1]; t = t.replace(sm[0], " "); }
     rows.push({ src: "kosho", raw: x.t, inp: { t: cleanTitle(t), media: "paper", src: "purchase", buy: { shop: `日本の古本屋（${x.shop}）`, d: x.d }, cond: ["古書", note].filter(Boolean).join("・"), bulk: true }, extra: {} });
   }
+  // honto：同じ本を何度か買ったものは1冊にまとめ、確認待ちに出す。「2巻セット」は巻をそろえる
+  for (const x of D.honto?.items || []) {
+    if (NOT_BOOK.test(x.t)) { excluded.push({ src: "honto", t: x.t, why: "本ではない品" }); continue; }
+    let t = nfkc(x.t), vols = null;
+    const set = t.match(/[①-⑳\d・、～〜-]*\s*(\d+)\s*巻セット/);
+    if (set) { const n = +set[1]; vols = []; for (let i = 1; i <= n; i++) vols.push(i); t = t.slice(0, set.index).replace(/スペシャルプライスパック/, "").trim(); }
+    const bib = x.isbn ? bibs.get(x.isbn) : null;
+    const mi = !x.isbn ? magIssue(t) : null;
+    const inp = mi ? { t: mi.t, issue: mi.issue } : { t: cleanTitle(t), catHint: vols ? "漫画" : catHintOf(t), isbn: x.isbn || undefined, bib: bib || undefined, vols: vols || undefined };
+    const buys = x.buys || [];
+    Object.assign(inp, { media: x.ebook ? "ebook" : "paper", store: x.ebook ? "honto" : undefined, src: "purchase", buy: buys[0], bulk: true });
+    rows.push({ src: "honto", raw: x.raw || x.t, inp, extra: { moreBuys: buys.slice(1), dupbuy: buys.length > 1, dupWhere: "hontoの履歴で" } });
+  }
   // 欲しいものリスト：読みたい（未所持）として。リストの名前を残す
   for (const [list, v] of Object.entries(D.wish?.lists || {})) for (const x of v.items || []) {
     const isbn = isbn13(x.asin), bib = isbn ? bibs.get(isbn) : null;
@@ -124,7 +149,7 @@ async function runAll(rows) {
     if (out.status === "want" && r.extra.wl) { const x = Lib.get(it.id); x.wl = r.extra.wl; Lib.put(x); }
     // 2回以上注文した本
     if (r.extra.moreBuys?.length) { const x = JSON.parse(JSON.stringify(Lib.get(it.id))); x.buy = x.buy || []; for (const b of r.extra.moreBuys) if (!x.buy.some(y => y.shop === b.shop && y.d === b.d)) x.buy.push(b); Lib.put(x); }
-    if (r.extra.dupbuy) Lib.qAdd("dupbuy", it.id, { why: `Amazonで${1 + r.extra.moreBuys.length}回注文しています。贈り物か買い直しか教えてください` });
+    if (r.extra.dupbuy) Lib.qAdd("dupbuy", it.id, { why: `${r.extra.dupWhere || "Amazonで"}${1 + r.extra.moreBuys.length}回買っています。贈り物か買い直しか教えてください` });
     // Kindleの「読んだ本」の印：読了の候補として確認待ちに出す（自動では読了にしない）
     if (r.extra.readCand) {
       if (it.kind === "series") {
@@ -151,6 +176,7 @@ async function load() {
   const isbns = [];
   for (const x of DATA.amazon?.items || []) { const i = isbn13(x.asin); if (i) isbns.push(i); }
   for (const v of Object.values(DATA.wish?.lists || {})) for (const x of v.items || []) { const i = isbn13(x.asin); if (i) isbns.push(i); }
+  for (const x of DATA.honto?.items || []) if (x.isbn) isbns.push(x.isbn);
   setMsg(`書誌を調べています（${isbns.length}冊）…`);
   BIBS = await Biblio.lookupMany(isbns, (n, all) => setMsg(`書誌を調べています（${n}/${all}冊）…`));
   await plan();
@@ -226,6 +252,7 @@ $("yesBtn").onclick = async () => {
 };
 
 (async () => {
+  $("day").textContent = `IMPORT · ${DAY}`; $("lead").textContent = IMPORTS[DAY].lead;
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); return; }
   await Shelf.init();
   const n = Shelf.read(Lib.P.novels); if (n) Biblio.setNovels(n);
