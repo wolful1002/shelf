@@ -66,8 +66,86 @@
   L.splitEd = title => { const t = String(title || "").normalize("NFKC"); const m = t.match(L.EDRE); return m ? { base: t.replace(L.EDRE, " ").replace(/\s+/g, " ").trim(), ed: m[1] } : { base: t.trim(), ed: "" }; };
   L.volMaps = it => [["", it.vols || {}], ...Object.entries(it.eds || {}).map(([e, x]) => [e, x.vols || {}])];
   L.ownVolCount = it => L.volMaps(it).reduce((s, [, m]) => s + Object.values(m).filter(v => v.own).length, 0);
+  // ---------- 判型（同じ本の単行本・文庫・分冊・出版社違いなど） ----------
+  // 1冊の本の記録に fm（版の一覧）を持たせ、版ごと・分冊の巻ごとに所有の印を付ける。
+  // fm：[{k:"f1", fmt:"文庫", pub, label, y, tr, media:"paper"|"ebook", loc, parts:[{v:"上"|"", isbn, asin, own:1, t}]}]
+  // 記録の isbn・fmt・pub など（一番上の項目）は、最初に登録した版のまま残す（書誌の補いと検索のため）
+  L.PARTRE = /[\s.．:：・]*[\[(（【〔]?\s*(上|中|下|上巻|中巻|下巻|前編|後編|前篇|後篇|PART\s*\d)\s*[\])）】〕]?\s*$/i;
+  // 書名を「分冊の印を除いた書名」と「分冊の印（上・下など。無ければ ""）」に分ける。末尾のレーベルの括弧は先に外す
+  L.splitPart = title => {
+    let s = String(title || "").normalize("NFKC").trim();
+    for (let i = 0; i < 4; i++) { const b = s; s = s.replace(/\s*[(（]((?:[^()（）]|[(（][^()（）]*[)）])*)[)）]\s*$/, (m, x) => /^\s*(上|中|下|上巻|中巻|下巻|前編|後編|前篇|後篇|PART\s*\d|第?\d{1,3}巻?|[IVXⅠ-Ⅻ]{1,5})\s*$/i.test(x) ? m : "").trim(); if (s === b) break; }
+    const m = s.match(L.PARTRE);
+    if (!m || m.index === 0) return { base: s, part: "" };
+    const p = m[1].replace(/巻$/, "").replace("篇", "編").replace(/^part\s*(\d)$/i, "PART$1");
+    return { base: s.slice(0, m.index).replace(/[\s.．:：・]+$/, "").trim(), part: p };
+  };
+  const PORD = { "": 0, 上: 1, 前編: 1, 中: 2, 下: 3, 後編: 3, PART1: 1, PART2: 2, PART3: 3, PART4: 4 };
+  L.partSort = (a, b) => (PORD[a.v] ?? 9) - (PORD[b.v] ?? 9);
+  L.fmtFromLabel = l => { l = String(l || "").normalize("NFKC"); return /コミックス|comics|KC$|コミック/i.test(l) ? "コミックス" : /新書/.test(l) ? "新書" : /文庫/.test(l) ? "文庫" : /ノベルス|ノベルズ|novels/i.test(l) ? "ノベルス" : /ムック|mook/i.test(l) ? "ムック" : undefined; };
+  L.fmName = e => [e.fmt || (e.media === "ebook" ? "電子" : "版不明"), e.label && e.label !== e.fmt ? e.label : "", e.pub, e.y ? e.y + "年" : ""].filter(Boolean).join("・");
+  L.fmOwned = it => !!it.fm?.some(e => e.parts.some(p => p.own));
+  // 記録に fm が無ければ、今の記録（と、前の形の alt）から作る
+  L.fmInit = x => {
+    if (x.fm) return x;
+    const sp = L.splitPart(x.t);
+    x.fm = [{ k: "f1", fmt: x.fmt || (x.media === "ebook" ? "電子" : L.fmtFromLabel(x.label)), pub: x.pub || undefined, label: x.label || undefined, y: x.y || undefined, media: x.media === "ebook" ? "ebook" : "paper", loc: x.loc || undefined,
+      parts: [{ v: sp.part, isbn: x.isbn || undefined, asin: x.asin || undefined, own: x.st === "own" ? 1 : undefined }] }];
+    for (const a of x.alt || []) L.fmAdd(x, { isbn: a.isbn, asin: a.asin, pub: a.pub, fmt: a.fmt, loc: a.loc, media: a.media, own: 1 });
+    delete x.alt;
+    return x;
+  };
+  const nrm = v => Biblio.norm(v || "");
+  // 版を足す（同じ版の別の巻なら、その版の巻として足す）。p：{isbn, asin, fmt, pub, label, y, media, loc, v（上・下など）, t, own}
+  L.fmAdd = (x, p) => {
+    L.fmInit(x);
+    for (const e of x.fm) { const q = e.parts.find(q => (p.isbn && q.isbn === p.isbn) || (p.asin && q.asin === p.asin)); if (q) { if (p.own) q.own = 1; return e; } }
+    const media = p.media === "ebook" ? "ebook" : "paper", v = p.v || "";
+    const fmt = p.fmt || (media === "ebook" ? "電子" : L.fmtFromLabel(p.label));
+    // 同じ版：紙・電子が同じで、判型・出版社がぶつからず、その巻がまだ無い
+    const fits = e => e.media === media && (!fmt || !e.fmt || e.fmt === fmt) && (!p.pub || !e.pub || nrm(e.pub) === nrm(p.pub)) && (!p.label || !e.label || nrm(e.label) === nrm(p.label));
+    const real = q => !!(q.isbn || q.asin);
+    let e = null;
+    for (const f of x.fm) {
+      if (!fits(f)) continue;
+      const hasV = f.parts.some(q => q.v);
+      if (v) {
+        // 分冊の巻：同じ巻が埋まっている版や、1冊ものとして中身のある版には入れない
+        if (f.parts.some(q => q.v === v && real(q))) continue;
+        if (!hasV && f.parts.some(real)) continue;
+        // 中身の無い仮の1冊（書名だけの記録から作ったもの）は、この巻に置き換える
+        if (!hasV) { const ph = f.parts.find(q => !real(q)); if (ph) ph.v = v; }
+      } else {
+        if (hasV || f.parts.some(real)) continue;
+      }
+      e = f; break;
+    }
+    if (!e) {
+      let n = x.fm.length + 1; while (x.fm.some(f => f.k === "f" + n)) n++;
+      e = { k: "f" + n, fmt, pub: p.pub || undefined, label: p.label || undefined, y: p.y || undefined, media, loc: p.loc || undefined, parts: [] };
+      x.fm.push(e);
+    } else for (const k of ["fmt", "pub", "label", "y", "loc"]) if (!e[k] && (k === "fmt" ? fmt : p[k])) e[k] = k === "fmt" ? fmt : p[k];
+    const q = e.parts.find(q => q.v === v && !q.isbn && !q.asin);
+    if (q) { q.isbn = p.isbn || undefined; q.asin = p.asin || undefined; if (p.own) q.own = 1; }
+    else e.parts.push({ v, isbn: p.isbn || undefined, asin: p.asin || undefined, t: p.t || undefined, own: p.own ? 1 : undefined });
+    e.parts.sort(L.partSort);
+    return e;
+  };
+  // 版の所有の印を付け外しする。どれかに印があれば、記録は「所有」にする
+  L.fmSetOwn = (x, ek, v, on) => {
+    const e = x.fm?.find(e => e.k === ek); const q = e?.parts.find(q => q.v === v); if (!q) return x;
+    if (on) q.own = 1; else delete q.own;
+    if (on && x.st !== "own") x.st = "own";
+    return x;
+  };
+  L.fmSummary = it => (it.fm || []).map(e => {
+    const own = e.parts.filter(p => p.own), name = e.fmt || e.label || (e.media === "ebook" ? "電子" : e.pub || "版不明");
+    const parts = e.parts.length > 1 || e.parts[0]?.v ? `（${e.parts.map(p => (p.v || "本") + (p.own ? "✓" : "")).join("・")}）` : own.length ? "✓" : "";
+    return name + parts;
+  }).join("／");
   L.byIsbn = isbn => {
     for (const it of Object.values(L.items())) {
+      if (it.fm) for (const e of it.fm) for (const p of e.parts) if (p.isbn === isbn) return { item: it, fm: e.k, part: p.v, partOwn: !!p.own };
       if (it.isbn === isbn) return { item: it };
       if (it.alt && it.alt.some(a => a.isbn === isbn)) return { item: it, alt: true };
       for (const [ed, m] of L.volMaps(it)) for (const [n, v] of Object.entries(m)) if (v.isbn === isbn) return { item: it, vol: it.issues ? n : +n, ed };
@@ -77,6 +155,7 @@
   L.byAsin = asin => {
     if (!asin) return null;
     for (const it of Object.values(L.items())) {
+      if (it.fm) for (const e of it.fm) for (const p of e.parts) if (p.asin === asin) return { item: it, fm: e.k, part: p.v, partOwn: !!p.own };
       if (it.asin === asin) return { item: it };
       if (it.alt && it.alt.some(a => a.asin === asin)) return { item: it, alt: true };
       for (const [ed, m] of L.volMaps(it)) for (const [n, v] of Object.entries(m)) if (v.asin === asin) return { item: it, vol: it.issues ? n : +n, ed };
@@ -327,7 +406,8 @@
   // 所有している冊数（シリーズは持っている巻の数）と、うち積読の冊数。画面の見出しの数字に使う
   L.ownSummary = () => {
     const own = Object.values(L.items()).filter(x => x.st === "own");
-    const n = it => it.kind === "series" ? L.ownVolCount(it) : 1;
+    // 版の一覧がある本は、印の付いた版・巻の数（上下巻なら2冊）。印が1つも無ければ1冊とみなす
+    const n = it => it.kind === "series" ? L.ownVolCount(it) : it.fm ? Math.max(1, it.fm.reduce((s, e) => s + e.parts.filter(p => p.own).length, 0)) : 1;
     return { books: own.reduce((s, it) => s + n(it), 0), records: own.length, tsun: own.filter(L.isUnreadOwned).length };
   };
 
@@ -420,6 +500,7 @@
     const hit = (inp.isbn && L.byIsbn(inp.isbn)) || (inp.asin && L.byAsin(inp.asin)) || null;
     if (hit) {
       let x = L.absorb(hit.item, inp, bib ? { pub: bib.pub, y: bib.y, cover: bib.cover, label: bib.label } : {});
+      if (hit.fm && !want && !hit.partOwn) { x = x || clone(hit.item); L.fmSetOwn(x, hit.fm, hit.part, true); }
       if (hit.vol != null && !want) {
         x = x || clone(hit.item);
         const m = hit.ed ? x.eds[hit.ed].vols : x.vols; const v = m[hit.vol] = m[hit.vol] || {};
@@ -427,7 +508,7 @@
         if (inp.media && v.media && v.media !== inp.media) v.media = "both"; else if (inp.media && !v.media) v.media = inp.media;
       }
       if (x) { L.put(x); if (x.nk && x.st === "own" && hit.item.st !== "own") { L.setOwn(x.nk, true); L.qDelFor(x.id); } }
-      return { status: hit.vol != null ? "voldup" : "dup", item: x || hit.item, vol: hit.vol, ed: hit.ed, filled: !!x };
+      return { status: hit.vol != null ? "voldup" : hit.fm && !hit.partOwn && !want ? "alt" : "dup", item: x || hit.item, vol: hit.vol, ed: hit.ed, filled: !!x };
     }
     if (inp.mag && !inp.issue) { const h = L.byMag(inp.mag, inp.magMonth); if (h) { const x = L.absorb(h, inp); if (x) L.put(x); return { status: "dup", item: x || h }; } }
     const ccode = inp.ccode || bib?.ccode || "";
@@ -508,8 +589,7 @@
         // 実物の記録がある：別の版なら同じ記録に足す。同じ版（ISBNが同じか、どちらかに無い）なら空いた項目を埋める
         const sameEd = !inp.isbn || !x.isbn || x.isbn === inp.isbn;
         if (!sameEd) {
-          x.alt = x.alt || [];
-          if (!x.alt.some(y => y.isbn === inp.isbn)) x.alt.push({ isbn: inp.isbn, asin: inp.asin || undefined, pub: base.pub || undefined, fmt: base.fmt || undefined, loc: base.loc || undefined, media });
+          L.fmAdd(x, { isbn: inp.isbn, asin: inp.asin, pub: base.pub, label: base.label, y: base.y, fmt: base.fmt, loc: base.loc, media, v: L.splitPart(t).part, t: t !== x.t ? t : undefined, own: 1 });
           if (inp.buy) { x.buy = x.buy || []; if (!x.buy.some(b => b.shop === inp.buy.shop && b.d === inp.buy.d)) x.buy.push(inp.buy); }
           if (x.st !== "own") x.st = "own";
         } else x = L.absorb(x, inp, base) || x;
@@ -525,8 +605,7 @@
         if (want) return { status: "dup", item: f.item };
         let x = clone(f.item);
         if (inp.isbn && x.isbn && x.isbn !== inp.isbn) {
-          x.alt = x.alt || [];
-          if (!x.alt.some(y => y.isbn === inp.isbn)) x.alt.push({ isbn: inp.isbn, asin: inp.asin || undefined, pub: base.pub || undefined, fmt: base.fmt || undefined, loc: base.loc || undefined, media });
+          L.fmAdd(x, { isbn: inp.isbn, asin: inp.asin, pub: base.pub, label: base.label, y: base.y, fmt: base.fmt, loc: base.loc, media, v: L.splitPart(t).part, t: t !== x.t ? t : undefined, own: 1 });
           if (inp.buy) { x.buy = x.buy || []; if (!x.buy.some(b => b.shop === inp.buy.shop && b.d === inp.buy.d)) x.buy.push(inp.buy); }
           if (x.st !== "own") x.st = "own";
           L.put(x); if (x.nk) L.setOwn(x.nk, true);
@@ -568,9 +647,22 @@
 
   // 2つの記録を1つにまとめる（from の情報で into の空いた項目を埋め、from は消す）
   L.mergeInto = (into, from) => {
-    const x = L.absorb(into, { ...from, buy: null, st: from.st }, from) || clone(into);
+    const fp = L.splitPart(from.t).part, ip = L.splitPart(into.t).part;
+    // 紙と電子の違いも版の違いとして分ける。書名と著者しか分からない記録（版の手がかりが無い）は、版を増やさずに書名へまとめる
+    const fromInfo = !!(from.isbn || from.asin || from.fmt || from.label || from.media === "ebook" || fp);
+    const mediaDiff = !!(from.media && into.media && (from.media === "ebook") !== (into.media === "ebook") && from.media !== "both" && into.media !== "both");
+    // レーベル（新潮文庫と単行本のシリーズ名など）や判型がどちらにも入っていて違うときも、別の版
+    const labelDiff = !!(from.label && into.label && Biblio.norm(from.label) !== Biblio.norm(into.label)) || !!(from.fmt && into.fmt && from.fmt !== into.fmt);
+    const edMerge = !!((from.isbn && into.isbn && from.isbn !== into.isbn) || fp !== ip || from.fm || mediaDiff || labelDiff || (into.fm && fromInfo));
+    // 版をまとめるときは、版ごとの項目（ISBN・判型・出版社・保管場所など）を元の記録に流し込まない（版の一覧に入れる）
+    const x = (edMerge ? L.absorb(into, { buy: null, st: from.st }, { a: from.a, tr: from.tr, cover: from.cover }) : L.absorb(into, { ...from, buy: null, st: from.st }, from)) || clone(into);
     if (from.buy) { x.buy = x.buy || []; for (const b of from.buy) if (!x.buy.some(y => y.shop === b.shop && y.d === b.d && y.v === b.v)) x.buy.push(b); }
-    if (from.isbn && x.isbn && from.isbn !== x.isbn) { x.alt = x.alt || []; if (!x.alt.some(y => y.isbn === from.isbn)) x.alt.push({ isbn: from.isbn, pub: from.pub || undefined, fmt: from.fmt || undefined, loc: from.loc || undefined, media: from.media }); }
+    // 別の版（ISBNが違う）や分冊の別の巻（上と下）は、版の一覧に足して、それぞれに所有の印を付ける
+    if (edMerge) {
+      if (!x.fm) { L.fmInit(x); if (ip) x.t = L.splitPart(into.t).base; }
+      const fromEds = from.fm || [{ fmt: from.fmt, pub: from.pub, label: from.label, y: from.y, media: from.media === "ebook" ? "ebook" : "paper", loc: from.loc, parts: [{ v: fp, isbn: from.isbn, asin: from.asin, own: from.st === "own" ? 1 : undefined, t: from.t !== x.t ? from.t : undefined }] }];
+      for (const e of fromEds) for (const p of e.parts) L.fmAdd(x, { ...e, ...p, k: undefined, parts: undefined });
+    }
     if (from.st === "own") x.st = "own";
     if (!x.nk && from.nk) { x.nk = from.nk; x.link = from.link; }
     // ブクログの記録との結び付きも引き継ぐ（引き継がないと、ブクログの画面で同じ本がまた「未登録」に出て、もう一度登録・確認することになる）
@@ -595,6 +687,8 @@
       const hit = L.byIsbn(c.code);
       // 読みたい（未所持）の本は「持っていない」として、読みたいに入っていることを添える
       if (hit && hit.item.st === "want") { const bib = await Biblio.lookup(c.code); return { owned: false, c, bib, wantItem: hit.item, ...extras(bib) }; }
+      // 同じ本の別の版としてだけ登録されている（この版には所有の印が無い）
+      if (hit && hit.fm && !hit.partOwn) { const bib = await Biblio.lookup(c.code); return { owned: false, c, bib, otherEd: hit.item, fmK: hit.fm, part: hit.part, ...extras(bib) }; }
       if (hit) return { owned: true, c, ...hit };
       const bib = await Biblio.lookup(c.code);
       if (bib) {

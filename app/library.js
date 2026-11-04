@@ -224,7 +224,7 @@ $("sort").addEventListener("change", () => { LST.desc = LST.sort === "added" || 
 $("fGroup").addEventListener("change", () => { LST.group = $("fGroup").checked; shown = 100; renderList(); });
 $("backBtn").onclick = () => { const s = stack.pop(); if (s) { LST = s; shown = 100; renderList(); } };
 function pushState(patch) { stack.push({ ...LST }); Object.assign(LST, patch); shown = 100; renderList(); window.scrollTo(0, 0); }
-const searchKey = it => Biblio.norm([it.t, it.sr, it.a, it.pub, it.label, it.isbn, it.asin, it.loc, it.eloc, it.note, ...Lib.volMaps(it).flatMap(([, m]) => Object.values(m).map(v => v.isbn))].filter(Boolean).join(" "));
+const searchKey = it => Biblio.norm([it.t, it.sr, it.a, it.pub, it.label, it.isbn, it.asin, it.loc, it.eloc, it.note, ...Lib.volMaps(it).flatMap(([, m]) => Object.values(m).map(v => v.isbn)), ...(it.fm || []).flatMap(e => [e.pub, e.label, e.loc, ...e.parts.map(p => p.isbn)])].filter(Boolean).join(" "));
 function listRows() {
   const q = Biblio.norm(LST.q);
   // 「読みたい（未所持）」は、所有していない読みたい本だけの一覧にする（並べ替えはほかと同じ）
@@ -280,6 +280,7 @@ function rowHtml(it) {
   const pills = [
     it.kind === "series" ? `<span class="pill acc">${esc(volSummary(it))}</span>` : "",
     it.sr ? `<button type="button" class="chip" data-by="series" data-v="${esc(it.sr)}">シリーズ『${esc(it.sr)}』${it.sv ? esc(it.sv) + "巻" : ""}</button>` : "",
+    it.fm?.length > 1 || it.fm?.[0]?.parts.length > 1 ? `<span class="pill acc" title="版ごとの所有">${esc(Lib.fmSummary(it))}</span>` : "",
     it.media === "ebook" ? `<span class="pill">電子</span>` : it.media === "both" ? `<span class="pill">紙＋電子</span>` : "",
     it.st === "want" ? `<span class="pill acc">読みたい（未所持）</span>` : "",
     it.nk ? `<span class="pill acc">必読書</span>` : it.link === "wait" ? `<span class="pill warn">結び付け確認待ち</span>` : "",
@@ -420,7 +421,7 @@ function openDetail(id) {
         <p class="small muted">読了と日付は、押したときにすぐ記録されます。</p>`}
       <div class="row"><label class="f" style="flex:1">保管場所<input type="text" id="dLoc" list="plDl" value="${esc(it.loc || "")}"><datalist id="plDl">${places.map(p => `<option value="${esc(p)}">`).join("")}</datalist></label><button type="button" class="small quiet" id="dLocSave">場所を保存</button></div>
     </div>
-    ${it.kind === "series" ? seriesHtml(it) : ""}
+    ${it.kind === "series" ? seriesHtml(it) : fmHtml(it)}
     ${it.sr ? seriesSiblingsHtml(it) : ""}
     <details class="dbib"><summary>書誌（自動で取得したもの。違っているときだけ直す）</summary>
     <div class="grid2">
@@ -434,7 +435,6 @@ function openDetail(id) {
     </div>
     <div class="row"><button type="button" id="dSave">書誌を保存する</button></div>
     ${it.buy?.length ? `<p class="small muted">購入：${it.buy.map(b => esc([b.d, b.shop, b.v ? b.v + (it.issues ? "" : "巻") : "", b.ed || ""].filter(Boolean).join(" "))).join("／")}</p>` : ""}
-    ${it.alt?.length ? `<p class="small muted">ほかの版：${it.alt.map(x => esc([x.fmt, x.pub, x.isbn, x.media === "ebook" ? "電子" : ""].filter(Boolean).join(" "))).join("／")}</p>` : ""}
     <div class="card" style="background:var(--bg)">
       <h3>必読書チェッカーとの結び付き</h3>
       ${work ? `<p><b>${esc(work.t)}</b>（${esc(work.a)}・${work.y}）<span class="pill acc">${esc(Biblio.tierNm(work.sc))}</span></p><div class="row"><a class="btn quiet small" href="novels.html">チェッカーを開く</a><button type="button" class="quiet small" id="dUnlink">結び付けを外す</button></div>`
@@ -477,7 +477,61 @@ function openDetail(id) {
     q("#dWres").innerHTML = hits.map(b => `<button type="button" data-wk="${b.k}">${esc(b.t)}（${esc(b.a)}・${b.y}）</button>`).join("") || `<p class="small muted">見つかりませんでした</p>`;
   };
   q("#dWres").onclick = e => { const b = e.target.closest("[data-wk]"); if (!b) return; Lib.link(it0, b.dataset.wk); UI.toast("結び付けました"); d.close(); };
-  if (it.kind === "series") bindSeries(d, it);
+  if (it.kind === "series") bindSeries(d, it); else bindFm(d, it);
+}
+// ---------- 版ごとの所有（単行本・文庫・分冊・出版社違いなど） ----------
+// 1つの書名の下に版を並べ、版ごと・分冊の巻ごとに「持っている」の印を付ける。印は押したときにすぐ記録する
+const FMTS = ["単行本", "文庫", "新書", "ノベルス", "コミックス", "ムック", "電子", "その他"];
+function fmHtml(it) {
+  const eds = it.fm || [];
+  const rows = eds.map(e => `<div class="fmed" data-fme="${esc(e.k)}"><div class="grow"><b>${esc(e.fmt || e.label || (e.media === "ebook" ? "電子" : "版不明"))}</b> <span class="small muted">${esc([e.label && e.label !== e.fmt ? e.label : "", e.pub, e.y ? e.y + "年" : "", e.media === "ebook" ? "電子" : "", e.loc].filter(Boolean).join("・"))}</span></div>
+      <div class="fmparts">${e.parts.map(p => `<label class="fmpart${p.own ? " on" : ""}" title="${esc([p.t, p.isbn].filter(Boolean).join(" "))}"><input type="checkbox" data-fmown="${esc(e.k)}" data-v="${esc(p.v)}"${p.own ? " checked" : ""}> ${esc(p.v || "持っている")}</label>`).join("")}</div></div>`).join("");
+  return `<div class="card" style="background:var(--bg)" id="fmCard">
+    <h3>版ごとの所有</h3>
+    ${eds.length ? `<p class="small muted">同じ本の単行本・文庫・分冊（上・下）・出版社違いなどを、版ごとに分けています。持っている版に印を付けてください。</p><div class="fmlist">${rows}</div>`
+      : `<p class="small muted">版は1つだけ登録されています。単行本と文庫など、別の版も持っている（または持っていない版を控えておきたい）ときは、下から足せます。</p>`}
+    <details class="fmadd"><summary class="small">版を足す</summary>
+      <div class="grid2">
+        <label class="f">判型<select id="fmFmt">${FMTS.map(f => `<option>${esc(f)}</option>`).join("")}</select></label>
+        <label class="f">出版社<input type="text" id="fmPub" value="${esc(it.pub || "")}"></label>
+        <label class="f">レーベル<input type="text" id="fmLabel" placeholder="例：新潮文庫"></label>
+        <label class="f">分冊（上・下など。1冊なら空のまま）<input type="text" id="fmParts" placeholder="例：上,下"></label>
+        <label class="f">ISBN（分かれば。分冊なら巻の順にカンマで区切る）<input type="text" id="fmIsbn" inputmode="numeric"></label>
+        <label class="row" style="gap:6px"><input type="checkbox" id="fmOwnNew" checked> 持っている</label>
+      </div>
+      <div class="row"><button type="button" class="small" id="fmAddBtn">この版を足す</button></div>
+    </details>
+  </div>`;
+}
+function bindFm(d, it) {
+  const q = s => d.querySelector(s);
+  const redraw = () => { const tmp = document.createElement("div"); tmp.innerHTML = fmHtml(it); q("#fmCard").replaceWith(tmp.firstElementChild); bindFm(d, it); };
+  q("#fmCard").addEventListener("change", e => {
+    const c = e.target.closest("[data-fmown]"); if (!c) return;
+    const x = JSON.parse(JSON.stringify(Lib.get(it.id))); const wasOwn = x.st === "own";
+    Lib.fmSetOwn(x, c.dataset.fmown, c.dataset.v, c.checked);
+    Lib.put(x); Object.assign(it, x);
+    if (!wasOwn && x.st === "own") { if (x.nk) Lib.setOwn(x.nk, true); Lib.qDelFor(x.id); }
+    for (const [qid, y] of Object.entries(Lib.queue())) if (y.target === x.id && y.type === "fmt") Lib.qDel(qid);
+    UI.toast(c.checked ? "持っている版に印を付けました" : "印を外しました");
+    if (!Lib.fmOwned(x) && x.st === "own") UI.toast("どの版にも印がありません。手放したときは「所有を外す」か「手放した」を押してください");
+    redraw();
+  });
+  q("#fmAddBtn").onclick = () => {
+    const x = JSON.parse(JSON.stringify(Lib.get(it.id)));
+    const fmt = q("#fmFmt").value, media = fmt === "電子" ? "ebook" : "paper";
+    const parts = q("#fmParts").value.split(/[,、，\s]+/).map(v => v.trim()).filter(Boolean);
+    const isbns = q("#fmIsbn").value.split(/[,、，\s]+/).map(v => Biblio.normIsbn(v.trim()) || "").filter(Boolean);
+    const own = q("#fmOwnNew").checked;
+    Lib.fmInit(x);
+    const base = { fmt, media, pub: q("#fmPub").value.trim() || undefined, label: q("#fmLabel").value.trim() || undefined, own };
+    // 新しく足す版は、既存の版と混ざらないよう、いったん別の版として作る
+    const n0 = x.fm.length;
+    (parts.length ? parts : [""]).forEach((v, i) => Lib.fmAdd(x, { ...base, v: v.replace(/巻$/, ""), isbn: isbns[i] }));
+    if (x.fm.length === n0 && !isbns.length) { UI.toast("同じ版がすでにあります"); }
+    if (own && x.st !== "own") { x.st = "own"; if (x.nk) Lib.setOwn(x.nk, true); }
+    Lib.put(x); Object.assign(it, x); UI.toast("版を足しました"); redraw();
+  };
 }
 // 巻ごとの所持と読了。版違い（モノクロ版など）は版を切り替えて扱う。雑誌は号の一覧を出す
 let curEd = "";
@@ -535,7 +589,7 @@ function bindSeries(d, it) {
 }
 
 // ---------- 確認待ち ----------
-const QNAME = { link: "チェッカーとの結び付け", cat: "本の種類", bib: "書誌が見つからない本", check: "書誌の確認", unowned: "所有を外した本", same: "同じ本かどうか", dupbuy: "2回以上買った本", read: "読了の候補", series: "シリーズかどうか", blread: "ブクログの読了記録" };
+const QNAME = { link: "チェッカーとの結び付け", cat: "本の種類", bib: "書誌が見つからない本", check: "書誌の確認", unowned: "所有を外した本", same: "同じ本かどうか", dupbuy: "2回以上買った本", read: "読了の候補", series: "シリーズかどうか", blread: "ブクログの読了記録", fmt: "持っている版" };
 // まとめて決めるときの操作。種類ごとに使えるものだけを出す（書誌の入力は1件ずつ）
 const QACTS = [
   { v: "link1", type: "link", label: "第1候補に結び付ける" },
@@ -585,6 +639,7 @@ function renderQueue() {
     else if (x.type === "dupbuy") act = `<div class="row"><button type="button" class="small" data-qdone="${id}">1冊だけ持っている</button><button type="button" class="small quiet" data-qnote="${id}" data-note="同じ本を2冊持っている">2冊持っている</button><button type="button" class="small quiet" data-qnote="${id}" data-note="1冊は贈り物にした">1冊は贈り物にした</button></div>`;
     else if (x.type === "blread") act = `<p class="small">ブクログの記録：<b>${esc(x.bt || "")}</b>${x.ba ? "（" + esc(x.ba) + "）" : ""}${x.bd ? "・" + esc(x.bd) : ""}</p><div class="cands">${(x.cands || [x.target]).map(cid => Lib.get(cid)).filter(Boolean).map(c => `<button type="button" data-qbl="${id}" data-into="${esc(c.id)}">この本と同じ（読了にする）：${esc(c.t)}${c.a ? "（" + esc(c.a) + "）" : ""}${c.loc ? "・" + esc(c.loc) : ""}</button>`).join("")}<button type="button" class="quiet" data-qbl="${id}" data-into="">違う本（読了にしない）</button></div>`;
     else if (x.type === "series") act = `<p class="small">同じシリーズの候補：${(x.cands || []).map(cid => Lib.get(cid)).filter(Boolean).map(c => "『" + esc(c.t) + "』").join("・")}</p><div class="row"><button type="button" class="small" data-qser="${id}" data-on="1">「${esc(x.name)}」のシリーズとしてまとめる</button><button type="button" class="small quiet" data-qser="${id}" data-on="">シリーズにしない</button></div>`;
+    else if (x.type === "fmt") act = `<p class="small">版：${esc(Lib.fmSummary(it))}</p><div class="row"><button type="button" class="small" data-qopen="${it.id}">開いて版に印を付ける</button><button type="button" class="small quiet" data-qdone="${id}">どれか分からないので、このままにする</button></div>`;
     else if (x.type === "read") act = `<div class="row"><button type="button" class="small" data-qread="${id}" data-on="1">読了にする</button><button type="button" class="small quiet" data-qread="${id}" data-on="">読了にしない</button></div>`;
     return `<div class="qitem${qSel.has(id) ? " sel" : ""}"><div class="row">${box}<span class="pill warn">${esc(QNAME[x.type] || x.type)}</span><span class="small muted">${esc(x.why || "")}</span></div>
       <p><b>${esc(it.t)}</b> <span class="small muted">${esc(it.a || "")}${it.pub ? "・" + esc(it.pub) : ""}${it.isbn ? "・" + esc(it.isbn) : ""}</span></p>${act}</div>`;

@@ -111,3 +111,11 @@ dialog .db{padding:16px;display:grid;gap:12px}
 @media print{.shelfbar,.noprint{display:none!important}body{background:#fff;padding:0}}
 
 details>summary{cursor:pointer;font-weight:700}
+
+/* 版ごとの所有 */
+.fmlist{display:grid;gap:6px}
+.fmed{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+.fmparts{display:flex;flex-wrap:wrap;gap:6px}
+.fmpart{display:inline-flex;align-items:center;gap:4px;min-height:40px;padding:2px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px}
+.fmpart.on{border-color:var(--ok);background:var(--ok-soft)}
+.fmadd{margin-top:8px}
