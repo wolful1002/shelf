@@ -5,7 +5,7 @@ UI.topbar("library.html");
 const CATS = Biblio.CATS;
 
 // ---------- 画面の切り替え ----------
-const TABS = ["register", "list", "queue", "stats", "places", "booklog", "photos", "off"];
+const TABS = ["register", "list", "queue", "missing", "stats", "places", "booklog", "photos", "off"];
 function showTab() {
   const t = TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "register";
   for (const x of TABS) { $("p-" + x).hidden = x !== t; document.querySelector(`[data-tab="${x}"]`).setAttribute("aria-current", x === t ? "true" : "false"); }
@@ -14,10 +14,12 @@ function showTab() {
 addEventListener("hashchange", showTab);
 function render(t = location.hash.slice(1) || "register") {
   $("qCount").textContent = Object.keys(Lib.queue()).length || "";
+  $("mCount").textContent = seriesForMissing().filter(it => missInfo(it).fresh.length).length || "";
   const sum = Lib.ownSummary(); $("libBig").innerHTML = `${sum.books}<small> 冊</small>`; $("libSub").textContent = `を所有・うち積読 ${sum.tsun}件`; $("eyebrow").textContent = `LIBRARY · ${sum.records} RECORDS`;
   if (t === "list") renderList();
   else if (t === "queue") renderQueue();
   else if (t === "stats") renderStats();
+  else if (t === "missing") renderMissing();
   else if (t === "places") renderPlaces();
   else if (t === "booklog") renderBooklog();
   else if (t === "off") renderOff();
@@ -98,10 +100,48 @@ async function onCode(code, src = "camera") {
     else { pendingC = { c: c.ccode, at: Date.now() }; Scan.beep("warn"); log("warn", `下段（${esc(c.ccode)} ${esc(Biblio.cText(c.ccode))}）を覚えました。続けて上段を読んでください`); }
     return;
   }
+  if (c.kind === "other" && window.Discs) { onDisc(c.code); return; }
   if (c.kind === "bad" || c.kind === "other") { Scan.beep("ng"); log("ng", `本のバーコードではありません（${esc(code)}）`); return; }
   if (mode === "batch") { addBatch(c.code); return; }
   await registerCode(c, src);
 }
+// ---------- 映画のソフト（DVD・Blu-ray） ----------
+// 本ではないバーコードを読んだら、登録済みのソフトか確かめ、無ければ作品を選んで登録してもらう
+let discSel = [], discJan = "";
+function onDisc(jan) {
+  const d = Discs.byJan(jan);
+  if (d) {
+    Scan.beep("dup");
+    log("dup", `所持済み（映画のソフト）：<b>${esc(Discs.name(d))}</b>・${esc(Discs.text(d) || "場所未設定")}${d.st === "gone" ? ` <span class="pill warn">手放した</span>` : ""}`);
+    return;
+  }
+  Scan.beep("warn");
+  discJan = jan; discSel = [];
+  $("discJan").textContent = jan; $("discQ").value = ""; $("discT").value = ""; $("discHits").innerHTML = "";
+  if (!$("discFmt").options.length) $("discFmt").innerHTML = Discs.FMT.map(x => `<option>${x}</option>`).join("");
+  renderDiscSel(); $("discBox").hidden = false; $("discQ").focus();
+  log("warn", `本ではないバーコード（${esc(jan)}）：映画のソフトなら下で作品を選んで登録できます`);
+}
+function renderDiscSel() {
+  $("discSel").innerHTML = discSel.length ? "選んだ作品：" + discSel.map(k => `<b>${esc(Discs.film(k)?.t || k)}</b> <button type="button" class="quiet small" data-dun="${k}">外す</button>`).join("　") : `<span class="muted">まだ作品を選んでいません</span>`;
+  $("discReg").disabled = !discSel.length;
+}
+$("discQ").addEventListener("input", () => {
+  const hits = Discs.search($("discQ").value);
+  $("discHits").innerHTML = hits.map(f => `<li><div><div class="t">${esc(f.t)}</div><div class="m"><span>${f.y || ""}</span>${f.d ? `<span>${esc(f.d)}</span>` : ""}${f.en ? `<span>${esc(f.en)}</span>` : ""}${Discs.ownedFilm(f.k).length ? `<span class="pill">ソフト所有</span>` : ""}</div></div><button type="button" class="small" data-dpick="${f.k}">${discSel.includes(f.k) ? "選択中" : "選ぶ"}</button></li>`).join("") || ($("discQ").value.trim() ? `<li class="empty">見つかりません。リストにない作品は、下の「名前」に作品名を入れて登録できます</li>` : "");
+});
+$("discHits").addEventListener("click", e => { const b = e.target.closest("[data-dpick]"); if (!b) return; if (!discSel.includes(b.dataset.dpick)) discSel.push(b.dataset.dpick); b.textContent = "選択中"; renderDiscSel(); });
+$("discSel").addEventListener("click", e => { const b = e.target.closest("[data-dun]"); if (!b) return; discSel = discSel.filter(k => k !== b.dataset.dun); renderDiscSel(); });
+$("discT").addEventListener("input", () => { $("discReg").disabled = !discSel.length && !$("discT").value.trim(); });
+$("discNo").onclick = () => { $("discBox").hidden = true; discJan = ""; $("scanIn").focus(); };
+$("discReg").onclick = () => {
+  const t = $("discT").value.trim();
+  if (!discSel.length && !t) return;
+  const d = Discs.add({ jan: discJan, fks: discSel, t: t || undefined, fmt: $("discFmt").value, loc: curLoc || undefined, src: "scanner", box: discSel.length > 1 ? 1 : undefined });
+  Scan.beep("ok");
+  log("ok", `登録（映画のソフト）：<b>${esc(Discs.name(d))}</b>・${esc(Discs.text(d))}`, () => Discs.remove(d.id));
+  $("discBox").hidden = true; discJan = ""; $("scanIn").focus();
+};
 function applyC(reg, ccode) {
   const it = Lib.get(reg.id); if (!it) return;
   const x = JSON.parse(JSON.stringify(it));
@@ -583,8 +623,9 @@ function bindSeries(d, it) {
   }
   q("#vUpBtn").onclick = () => { const n = +q("#vUpTo").value; if (!n) return; const m = volMap(it, curEd); for (let i = 1; i <= n; i++) { const v = m[i] = m[i] || {}; if (!v.read) v.read = 1; } Lib.put(it); redraw(); UI.toast(`${n}巻まで読了にしました`); };
   q("#vAddBtn").onclick = () => { const n = +q("#vAdd").value; if (!n) return; const m = volMap(it, curEd); m[n] = { ...(m[n] || {}), own: 1 }; Lib.put(it); redraw(); };
-  q("#vTotal").onchange = () => { const n = +q("#vTotal").value; if (n) it.total = n; else delete it.total; Lib.put(it); redraw(); };
-  q("#vDone").onchange = () => { it.done = q("#vDone").checked || undefined; Lib.put(it); };
+  // 手で直した既刊数・完結は、定期タスクが上書きしない（totalAuto・doneAuto を外す）
+  q("#vTotal").onchange = () => { const n = +q("#vTotal").value; if (n) it.total = n; else delete it.total; delete it.totalAuto; Lib.put(it); redraw(); };
+  q("#vDone").onchange = () => { it.done = q("#vDone").checked || undefined; delete it.doneAuto; Lib.put(it); };
   q("#vEdBtn").onclick = () => { const e = q("#vEdName").value.trim(); if (!e) return; volMap(it, e); curEd = e; Lib.put(it); redraw(); };
 }
 
@@ -743,6 +784,42 @@ function applyReadCand(x, it) {
 function bars(rows, total) {
   return `<div class="bars">${rows.map(([k, n]) => `<span>${esc(k)}</span><span class="tr"><i style="width:${total ? Math.max(2, n / total * 100) : 0}%"></i></span><span class="mono">${n}</span>`).join("")}</div>`;
 }
+// ---------- 欠け巻・新刊 ----------
+// 漫画などのシリーズ（雑誌は除く）について、持っていない巻（1〜持っている最後の巻のあいだ）と、
+// 新しく出た巻（持っている最後の巻より後で、既刊数まで）を出す
+let missAll = false;
+function missInfo(it) {
+  const own = Object.entries(it.vols || {}).filter(([, v]) => v.own).map(([n]) => +n).filter(n => n > 0).sort((a, b) => a - b);
+  const last = own.length ? own[own.length - 1] : 0;
+  const gaps = []; for (let i = 1; i < last; i++) if (!own.includes(i)) gaps.push(i);
+  const fresh = []; if (it.total) for (let i = last + 1; i <= it.total; i++) fresh.push(i);
+  return { own, last, gaps, fresh };
+}
+function seriesForMissing() {
+  return Object.values(Lib.items()).filter(it => it.kind === "series" && !it.issues && it.st === "own");
+}
+function renderMissing() {
+  const all = seriesForMissing().map(it => ({ it, ...missInfo(it) }));
+  const hit = all.filter(x => x.gaps.length || x.fresh.length);
+  const rows = (missAll ? all : hit).sort((a, b) => (b.fresh.length > 0) - (a.fresh.length > 0) || (b.it.totalUp || "").localeCompare(a.it.totalUp || "") || a.it.t.localeCompare(b.it.t, "ja"));
+  const checked = all.filter(x => x.it.totalAt).length;
+  $("msNote").textContent = `シリーズ ${all.length}件・既刊数を確かめた ${checked}件・新刊があるもの ${hit.filter(x => x.fresh.length).length}件・欠け巻があるもの ${hit.filter(x => x.gaps.length).length}件`;
+  const rng = ns => ns.length > 6 ? `${ns.slice(0, 5).join("・")}…${ns[ns.length - 1]}` : ns.join("・");
+  $("missList").innerHTML = rows.map(({ it, own, gaps, fresh }) => `<li><div><div class="t">${esc(it.t)}</div><div class="m">
+      <span>所持 ${own.length}${it.total ? "/" + it.total : ""}巻</span>
+      ${fresh.length ? `<span class="pill acc">新刊 ${esc(rng(fresh))}巻</span>` : ""}
+      ${gaps.length ? `<span class="pill warn">欠け ${esc(rng(gaps))}巻</span>` : ""}
+      ${it.done ? `<span class="pill">完結</span>` : ""}
+      <span class="small muted">${it.totalAt ? `既刊数を確かめた日 ${esc(it.totalAt)}` : "既刊数は未確認"}${it.totalSrc ? `・<a href="${esc(it.totalSrc)}" target="_blank" rel="noopener">出典</a>` : ""}</span>
+    </div></div><button type="button" class="quiet small" data-mopen="${esc(it.t)}">一覧で開く</button></li>`).join("") || `<li class="empty">${missAll ? "シリーズはありません" : "新刊・欠け巻のあるシリーズはありません"}</li>`;
+  $("mCount").textContent = hit.filter(x => x.fresh.length).length || "";
+}
+$("msNew").onclick = () => { missAll = false; $("msNew").setAttribute("aria-pressed", "true"); $("msAll").setAttribute("aria-pressed", "false"); renderMissing(); };
+$("msAll").onclick = () => { missAll = true; $("msAll").setAttribute("aria-pressed", "true"); $("msNew").setAttribute("aria-pressed", "false"); renderMissing(); };
+$("missList").addEventListener("click", e => {
+  const b = e.target.closest("[data-mopen]"); if (!b) return;
+  LST = { ...LST, q: b.dataset.mopen, cat: "", media: "", loc: "", read: "", link: "" }; shown = 100; location.hash = "#list";
+});
 function renderStats() {
   const own = Object.values(Lib.items()).filter(it => it.st === "own");
   const count = it => it.kind === "series" ? Lib.ownVolCount(it) : 1;

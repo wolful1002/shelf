@@ -720,7 +720,9 @@
     const series = sv.vol != null ? L.seriesFor(sv.base) : null;
     const m = Biblio.matchNovel(bib.t, bib.a);
     const work = m?.status === "auto" ? m.work : null;
-    const films = Biblio.filmsByTitle(bib.t);
+    // 映画化：題名が同じ映画に加え、原作と映画の対応表（works/adaptations.json）にある映画も出す
+    const films = Biblio.filmsByTitle(bib.t).slice();
+    if (work) for (const p of (Shelf.read("works/adaptations.json")?.pairs || [])) if (p.n === work.k && !films.some(f => f.t === p.ft)) films.push({ t: p.ft, y: p.fy, k: p.f });
     return { sameTitle, series, vol: sv.vol, ed: se.ed, work, workRead: work ? !!L.ndoc().read[work.k] : false, films };
   }
 

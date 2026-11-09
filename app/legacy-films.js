@@ -117,7 +117,7 @@ let want = {};          // key -> "YYYY-MM-DD"（観たい印を付けた日）
 let seen = {};          // key -> "YYYY-MM-DD"
 let info = {};          // key -> {st:[svc], disc:"y"|"n", at:"YYYY-MM-DD"}
 let openKey = null;
-let state = {tier:null, list:"", decade:"", country:"", jp:"", rec:"", q:"", watch:"all", sort:"score", shown:1e9};
+let state = {tier:null, list:"", decade:"", country:"", jp:"", rec:"", adp:"", q:"", watch:"all", sort:"score", shown:1e9};
 const PAGE = 1e9;   // 全件を一度に表示
 const $ = id => document.getElementById(id);
 
@@ -377,7 +377,7 @@ function buildControls(){
   for(const [,nm] of SVC) if(nm !== "その他" && !(nm in sc)) sc[nm] = 0;
   $("svcOpts").innerHTML = Object.entries(sc).sort((a,b)=>b[1]-a[1]).map(([nm])=>`<option value="s:${esc(nm)}">${esc(nm)}で見放題</option>`).join("");
   $("stats").addEventListener("click", e=>{ const j = e.target.closest(".jmp"); if(j) navigate(j.dataset.k, "__stats") });
-  for(const [id,key] of [["country","country"],["jpf","jp"],["rec","rec"]])
+  for(const [id,key] of [["country","country"],["jpf","jp"],["rec","rec"],["adp","adp"]])
     $(id).addEventListener("change", e=>{ state[key]=e.target.value; state.shown=PAGE; renderList() });
   renderLegend();
   let qTimer = null;
@@ -425,6 +425,20 @@ function buildControls(){
     if(jm){ navigate(jm.dataset.k, jm.closest(".row").dataset.k); return }
     const op = e.target.closest(".open");
     if(op){ const k = op.closest(".row").dataset.k, old = openKey; openKey = openKey===k ? null : k; if(old && old !== k) refreshRow(old); refreshRow(k); return }
+    const da = e.target.closest("[data-dact]");
+    if(da && window.Discs){
+      const li = da.closest(".row"), k = li.dataset.k, act = da.dataset.dact;
+      if(act==="add"){
+        const box = da.closest(".dform"), jan = box.querySelector(".djan").value.replace(/\D/g,"");
+        if(jan && Discs.byJan(jan)){ alert("このバーコードのソフトは登録済みです：" + Discs.name(Discs.byJan(jan))); return }
+        Discs.add({fks:[k], fmt:box.querySelector(".dfmt").value, loc:box.querySelector(".dloc").value.trim(), jan: jan || undefined, src:"checker"});
+      } else {
+        const d = Discs.get(da.closest("[data-d]").dataset.d); if(!d) return;
+        if(act==="del"){ if(!confirm("このソフトの記録を消しますか？")) return; Discs.remove(d.id) }
+        else Discs.put({...d, st: act==="gone" ? "gone" : "own"});
+      }
+      refreshRow(k); renderSummary(); return;
+    }
     const pl = e.target.closest(".pill");
     if(pl){
       const li = pl.closest(".row"), k = li.dataset.k;
@@ -440,19 +454,19 @@ function buildControls(){
     renderSummary(); renderPick();
   });
 }
-const WATCH_BTNS = [["fAll","all"],["fTodo","todo"],["fDone","done"],["fWant","want"]];
+const WATCH_BTNS = [["fAll","all"],["fTodo","todo"],["fDone","done"],["fWant","want"],["fOwn","own"],["fOwnTodo","owntodo"]];
 function syncWatchBtns(){ for(const [b,v] of WATCH_BTNS) $(b).setAttribute("aria-pressed", state.watch===v) }
 // put every control back in line with state (used when a view is restored)
 function syncSortDir(){ const b = $("sortDir"); if(!b) return; b.textContent = state.desc ? "↑ 降順" : "↓ 昇順"; b.setAttribute("aria-pressed", !!state.desc); }
 function syncControls(){
   $("q").value = state.q; $("list").value = state.list; $("decade").value = state.decade; $("country").value = state.country;
-  $("jpf").value = state.jp; $("rec").value = state.rec; $("sort").value = state.sort; syncWatchBtns(); syncSortDir();
+  $("jpf").value = state.jp; $("rec").value = state.rec; $("adp").value = state.adp; $("sort").value = state.sort; syncWatchBtns(); syncSortDir();
 }
 // open a film from elsewhere on the page (same-director list, today's pick); one click on the back button returns
 function navigate(k, fromK){
   pushView(fromK || openKey || k);
   if(!filtered().some(f=>f.k===k)){
-    Object.assign(state, {tier:null, list:"", decade:"", country:"", jp:"", rec:"", q:"", watch:"all"});
+    Object.assign(state, {tier:null, list:"", decade:"", country:"", jp:"", rec:"", adp:"", q:"", watch:"all"});
     syncControls(); renderSummary();
   }
   openKey = k;
@@ -499,9 +513,12 @@ function filtered(){
     if(state.rec==="unk" && vodKnown(f)) return false;
     if(state.rec.startsWith("s:") && !subOf(f).includes(state.rec.slice(2))) return false;
     if(state.rec==="disc" && !(info[f.k] && info[f.k].disc==="y")) return false;
+    if(state.adp && !(window.Adapt && Adapt.matchFilm(state.adp, f.k, k=>!!seen[k]))) return false;
     if(state.watch==="todo" && seen[f.k]) return false;
     if(state.watch==="done" && !seen[f.k]) return false;
     if(state.watch==="want" && (!want[f.k] || seen[f.k])) return false;
+    if(state.watch==="own" && !ownDisc(f.k)) return false;
+    if(state.watch==="owntodo" && (!ownDisc(f.k) || seen[f.k])) return false;
     if(q.length && !q.every(w=>skOf(f).includes(w)) && !skOf(f).includes(qWhole)) return false;
     return true;
   });
@@ -564,6 +581,25 @@ function sameBlock(f){
   return `<div class="full"><h4>同じ監督のリスト内作品 ${xs.length}本（未見 ${todo}本）</h4><ul class="same">${xs.map(g=>
     `<li><button class="jmp" data-k="${g.k}">${esc(g.t)}</button><span class="m">${g.y||"—"}・スコア${Math.round(g.sc)}</span>${seen[g.k] ? `<span class="ok">✓ 鑑賞済</span>` : ""}${!seen[g.k] && want[g.k] ? `<span class="m" style="color:var(--accent)">★ 観たい</span>` : ""}${subOf(g).length ? `<span class="m">見放題あり</span>` : ""}</li>`).join("")}</ul></div>`;
 }
+// 手持ちのソフト（DVD・Blu-ray）。記録は records/discs.json（app/discs.js）
+const ownDisc = k => !!(window.Discs && Discs.ownedFilm(k).length);
+function discBlock(f){
+  if(!window.Discs) return "";
+  const ds = Discs.forFilm(f.k);
+  const li = d => `<li data-d="${d.id}"><span class="${d.st==="gone"?"gone":""}">${esc(d.fmt)}${d.box?"ボックス":""}${(d.fks||[]).length>1||d.t ? `「${esc(Discs.name(d))}」` : ""}</span>${d.loc?`<span class="mm">${esc(d.loc)}</span>`:""}${d.jan?`<span class="mm">${esc(d.jan)}</span>`:""}${d.st==="gone"?`<span class="mm">手放した</span><button type="button" class="dbtn q" data-dact="own">所有に戻す</button>`:`<button type="button" class="dbtn q" data-dact="gone">手放した</button>`}<button type="button" class="dbtn q" data-dact="del">消す</button></li>`;
+  return `<h4 style="margin-top:14px">手持ちのソフト</h4>
+    ${ds.length ? `<ul class="mydisc">${ds.map(li).join("")}</ul>` : `<p class="note" style="margin:0">まだ登録していません。</p>`}
+    <div class="dform"><select class="dfmt" aria-label="ソフトの種類">${Discs.FMT.map(x=>`<option>${x}</option>`).join("")}</select><input class="dloc" placeholder="保管場所" aria-label="保管場所"><input class="djan" inputmode="numeric" placeholder="バーコード（任意）" aria-label="バーコードの番号"><button type="button" class="dbtn" data-dact="add">持っているソフトとして登録</button></div>
+    <p class="note">バーコードは蔵書の「登録」画面で読んでも登録できます。ボックスはそちらで、入っている作品をまとめて選べます。</p>`;
+}
+// 原作と映画（必読書チェッカーにある原作）
+function adaptDD(f){
+  const ps = window.Adapt ? Adapt.novelsOf(f.k) : []; if(!ps.length) return "";
+  return `<dt>原作</dt><dd>${ps.map(p=>{
+    const r = Adapt.novelRead(p.n);
+    return `<a href="novels.html#k=${p.n}">${esc(p.nt)}</a>（${esc(p.na)}${p.ny ? "・" + (p.ny < 0 ? "前" + (-p.ny) : p.ny) : ""}）<span class="mm" style="${r ? "color:var(--done)" : ""}">${r ? "✓ 読了" : "未読"}</span>`;
+  }).join("<br>")}</dd>`;
+}
 function rowHTML(f){
   const on = !!seen[f.k];
   const strip = allKeys().map(k=>`<i class="${k==="b1001"?"base ":""}${k.startsWith("c_")?"cu ":""}${k in f.s?"on":""}" title="${esc(DATA.lists[k].name)}${k in f.s ? rankText(k,f.s[k]) : ""}"></i>`).join("");
@@ -571,7 +607,8 @@ function rowHTML(f){
   const url = "https://www.google.com/search?q=" + encodeURIComponent(`${f.t} ${f.y} 映画`);
   const inf = info[f.k] || {}, st = inf.st || [];
   const isOpen = openKey === f.k;
-  const tags = vodTag(f) + (inf.disc==="y" ? `<span class="disc-tag">DVD/BD</span>` : "");
+  const owned = window.Discs ? Discs.ownedFilm(f.k) : [];
+  const tags = vodTag(f) + (owned.length ? `<span class="own-tag" title="手持ちのソフト">所有 ${esc([...new Set(owned.map(d=>d.fmt))].join("・"))}</span>` : inf.disc==="y" ? `<span class="disc-tag">DVD/BD</span>` : "");
   const dir = f.d ? esc(f.d) : `<span class="unsure">監督 要確認</span>`;
   const qt = encodeURIComponent(f.t.replace(/（.*?）/g,""));
   const detail = !isOpen ? "" : `<div class="detail">
@@ -584,6 +621,7 @@ function rowHTML(f){
         <dt>公開年</dt><dd>${f.y || "要確認"}${f.note ? `<span class="mm">（${esc(f.note)}）</span>` : ""}</dd>
         <dt>上映時間</dt><dd>${f.rt ? `${f.rt}分${f.rt >= 60 ? `（${Math.floor(f.rt/60)}時間${f.rt%60 ? `${f.rt%60}分` : ""}）` : ""}<span class="mm">　${f.rts === "t" ? "TMDBの登録値" : "Claudeの知識による目安"}</span>` : `<span class="mm">未確認</span>`}</dd>
         <dt>原題・英題</dt><dd>${esc(f.en || "—")}</dd>
+        ${adaptDD(f)}
         <dt>日本での入手性</dt><dd>${f.j ? JP[f.j]+"（目安）" : "未確認（追加リストの新規作品）"}</dd>
         <dt>スコア</dt><dd>${Math.round(f.sc)}（全映画対象のリスト ${f.gh}/${f.ge}、専門リスト ${f.sh}/${f.se}）</dd>
         <dt>掲載リスト</dt><dd>${allKeys().filter(k=>k in f.s).map(k=>esc(DATA.lists[k].name)+rankText(k,f.s[k])).join("<br>")}</dd>
@@ -593,6 +631,7 @@ function rowHTML(f){
         <h4 style="margin-top:14px">国内DVD／Blu-ray</h4>
         <div class="pills">${DISC.map(([v,nm])=>`<button class="pill" data-disc="${v}" aria-pressed="${(inf.disc||"")===v}">${nm}</button>`).join("")}</div>
         <p class="note">${inf.at ? `最終更新 ${inf.at}。` : ""}ここで選んだサービスは「見放題あり」の絞り込みや一覧の表示に、Claude調べの結果と合わせて使います。</p>
+        ${discBlock(f)}
         <h4 style="margin-top:14px">調べる</h4>
         <div class="links">
           <a href="https://www.justwatch.com/jp/%E6%A4%9C%E7%B4%A2?q=${qt}" target="_blank" rel="noopener">JustWatch（配信）</a>
@@ -780,7 +819,14 @@ $("tiers").addEventListener("click", e=>{
 // 開くときは記録が順にそろうたびに一覧を描き直していたので、そろうまで描くのを待ち、最後に1回だけ描く
 var BOOT = true;
 function renderAll(){ if(BOOT) return; renderSummary(); renderList(); renderPick() }
-const endBoot = () => { if(!BOOT) return; BOOT = false; renderAll() };
+// 他の画面からの直接の移動（films.html#k=作品の番号）
+function openFromHash(){
+  const m = location.hash.match(/^#k=([0-9a-z]+)$/i); if(!m || !films.some(f=>f.k===m[1])) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  navigate(m[1]);
+}
+addEventListener("hashchange", openFromHash);
+const endBoot = () => { if(!BOOT) return; BOOT = false; renderAll(); openFromHash() };
 setTimeout(endBoot, 2500);
 
 // ---------- today's pick ----------

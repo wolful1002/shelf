@@ -24,7 +24,7 @@ const amzURL = b => "https://www.amazon.co.jp/s?i=stripbooks&k=" + encodeURIComp
 const trLabel = b => b.tr===2 ? `<span class="tag jp">日本語原作</span>` : b.tr===1 ? `<span class="tag">邦訳あり</span>` : `<span class="tag no-tr">邦訳なし</span>`;
 
 let read = {}, want = {}, own = {}, rr = {};   // rr[k]：2回目以降に読んだ日の一覧（最初に読んだ日は read[k]）
-let st = {tier:null,list:"",cty:"",era:"",tr:"",kd:"",gn:"",q:"",status:"all",sort:"score"};
+let st = {tier:null,list:"",cty:"",era:"",tr:"",kd:"",gn:"",adp:"",q:"",status:"all",sort:"score"};
 let openKey = null;
 
 // ---------- storage: one private doc per person in the artifact db; this device keeps a copy ----------
@@ -254,7 +254,7 @@ function buildControls(){
   let qTimer = null;
   $("q").addEventListener("input", e=>{ clearTimeout(qTimer); qTimer = setTimeout(()=>{ st.q = e.target.value.trim().toLowerCase(); keepPlace() }, 250) });
   $("sortDir").addEventListener("click", ()=>{ sortBefore(); st.desc = !st.desc; sortAfter(); syncSortDir(); renderList(true); });
-  for(const [id,key] of [["list","list"],["cty","cty"],["era","era"],["tr","tr"],["kd","kd"],["gn","gn"],["sort","sort"]])
+  for(const [id,key] of [["list","list"],["cty","cty"],["era","era"],["tr","tr"],["kd","kd"],["gn","gn"],["adp","adp"],["sort","sort"]])
     $(id).addEventListener("change", e=>{
       if(key!=="sort"){ st[key] = e.target.value; keepPlace(); return }
       const a = anchorRow(); sortBefore(); st.sort = e.target.value; sortAfter(); renderList(true);
@@ -331,6 +331,7 @@ function matches(b){
   if(st.gn && st.gn!=="none" && !b.g.includes(st.gn)) return false;
   if(st.tr==="ja" && b.tr===0) return false;
   if(st.tr==="none" && b.tr!==0) return false;
+  if(st.adp && !(window.Adapt && Adapt.matchNovel(st.adp, b.k, k=>!!read[k]))) return false;
   if(st.status==="todo" && read[b.k]) return false;
   if(st.status==="done" && !read[b.k]) return false;
   if(st.status==="want" && (!want[b.k] || read[b.k])) return false;
@@ -417,6 +418,14 @@ function libHTML(b){
   const one = (x, extra) => [x.pub, x.label, x.fmt, x.isbn, md(x.media)].filter(Boolean).join("・") + (extra ? "" : "");
   return `<div style="font-size:13px;color:var(--muted)">蔵書 <span style="color:var(--ink)">${its.map(it => `${esc(one(it))}${it.loc ? "　保管場所：" + esc(it.loc) : ""}${(it.alt||[]).map(a => `／別の版：${esc([a.pub, a.fmt, a.isbn, md(a.media)].filter(Boolean).join("・"))}${a.loc ? "（" + esc(a.loc) + "）" : ""}`).join("")}`).join("<br>")}</span>　<a href="library.html#list">蔵書を開く</a></div>`;
 }
+// 原作と映画（映画チェッカーにある映画化作品）
+function adaptHTML(b){
+  const ps = window.Adapt ? Adapt.filmsOf(b.k) : []; if(!ps.length) return "";
+  return `<div style="font-size:13px;color:var(--muted)">映画化 <span style="color:var(--ink)">${ps.map(p=>{
+    const s = Adapt.filmSeen(p.f);
+    return `<a href="films.html#k=${p.f}">${esc(p.ft)}</a>（${p.fy||"年不明"}${p.fd ? "・" + esc(p.fd) : ""}）<span style="font-size:12px;color:${s ? "var(--done)" : "var(--muted)"}">${s ? "✓ 鑑賞済" : "未見"}</span>`;
+  }).join("　")}</span></div>`;
+}
 function detailHTML(b){
   const grp = g => ORDER.filter(k=>L[k].kind!=="genre"===(g==="l") && elig(b,k)).map(k=>{
     const on = k in b.s;
@@ -434,6 +443,7 @@ function detailHTML(b){
   return `<div class="det">
     ${rdHTML}
     ${libHTML(b)}
+    ${adaptHTML(b)}
     <div style="font-size:13px;color:var(--muted)">原題 <span style="color:var(--ink)">${esc(b.o)}</span>${b.ty==="S"?"　・短編集":""}</div>
     ${b.tr===2 && b.jp ? `<div style="font-size:13px;color:var(--muted)">主な刊行 <span style="color:var(--ink)">初刊 ${esc(b.jp)}${b.jy?`（${b.jy}年）`:""}${b.jb?`　現在の主な版 ${esc(b.jb)}`:""}</span>${b.jv ? `<span class="tagm">Webで確認済み${b.jvd ? "（" + b.jvd + "）" : ""}</span>` : ""}${b.js ? `　<a href="${esc(b.js)}" target="_blank" rel="noopener">出典</a>` : ""}　<a href="https://ndlsearch.ndl.go.jp/search?cs=bib&keyword=${encodeURIComponent(b.t+" "+b.a)}" target="_blank" rel="noopener">国立国会図書館で版を確かめる</a></div>` : ""}
     ${b.tr===1 ? `<div style="font-size:13px;color:var(--muted)">主な邦訳 <span style="color:var(--ink)">${b.jp ? esc(b.jp) + (b.jy ? `（${b.jy}年）` : "") : "未確認"}</span>${b.jv ? `<span class="tagm">Webで確認済み${b.jvd ? "（" + b.jvd + "）" : ""}</span>` : ""}${b.js ? `　<a href="${esc(b.js)}" target="_blank" rel="noopener">出典</a>` : ""}${b.jn ? `<div style="font-size:12px;margin-top:2px">${esc(b.jn)}</div>` : ""}　<a href="https://ndlsearch.ndl.go.jp/search?cs=bib&keyword=${encodeURIComponent(b.t+" "+b.a)}" target="_blank" rel="noopener">国立国会図書館で版を確かめる</a></div>` : ""}
@@ -476,7 +486,7 @@ function focusRow(k, center){
 }
 function jumpTo(k){
   const b = byKey.get(k);
-  if(!matches(b)){ st = {...st, tier:null,list:"",cty:"",era:"",tr:"",kd:"",gn:"",q:"",status:"all"}; syncControls() }
+  if(!matches(b)){ st = {...st, tier:null,list:"",cty:"",era:"",tr:"",kd:"",gn:"",adp:"",q:"",status:"all"}; syncControls() }
   openKey = k; renderSummary(); renderList(true); ensureRow(k);
   const li = document.querySelector(`.row[data-k="${k}"]`);
   if(li){ li.scrollIntoView({block:"center"}); li.classList.add("flash"); setTimeout(()=>li.classList.remove("flash"), 1800) }
@@ -548,7 +558,7 @@ function popView(){
 }
 function syncSortDir(){ const b = $("sortDir"); if(!b) return; b.textContent = st.desc ? "↑ 降順" : "↓ 昇順"; b.setAttribute("aria-pressed", !!st.desc); }
 function syncControls(){
-  for(const [id,key] of [["list","list"],["cty","cty"],["era","era"],["tr","tr"],["kd","kd"],["gn","gn"],["sort","sort"]]) $(id).value = st[key];
+  for(const [id,key] of [["list","list"],["cty","cty"],["era","era"],["tr","tr"],["kd","kd"],["gn","gn"],["adp","adp"],["sort","sort"]]) $(id).value = st[key];
   $("q").value = st.q; syncSortDir();
   [["fAll","all"],["fTodo","todo"],["fWant","want"],["fDone","done"],["fOwn","own"],["fTsun","tsundoku"]].forEach(([b,v])=>$(b).setAttribute("aria-pressed", st.status===v));
 }
@@ -1256,7 +1266,14 @@ function initLog(){
 var BOOT = true;
 function renderAll(){ if(BOOT) return; renderSummary(); renderList(); renderPick() }
 { const m = renderMy, l = renderLog; renderMy = () => { if(!BOOT) m() }; renderLog = () => { if(!BOOT) l() } }
-const endBoot = () => { if(!BOOT) return; BOOT = false; renderAll(); renderMy(); renderLog(); renderBibInfo() };
+// 他の画面からの直接の移動（novels.html#k=作品の番号）
+function openFromHash(){
+  const m = location.hash.match(/^#k=([0-9a-z]+)$/i); if(!m || !byKey.has(m[1])) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  jumpTo(m[1]);
+}
+addEventListener("hashchange", openFromHash);
+const endBoot = () => { if(!BOOT) return; BOOT = false; renderAll(); renderMy(); renderLog(); renderBibInfo(); openFromHash() };
 setTimeout(endBoot, 2500);
 custom = cRead(); blog = lRead(); applyCustom();
 buildControls(); buildMeta(); initMy(); initLog();

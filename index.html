@@ -10,8 +10,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app/ui.css?v=202611041138">
-<link rel="stylesheet" href="app/bar.css?v=202611041138">
+<link rel="stylesheet" href="app/ui.css?v=202611091504">
+<link rel="stylesheet" href="app/bar.css?v=202611091504">
 </head>
 <body>
 <main class="wrap" id="main">
@@ -62,12 +62,13 @@
 </main>
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
-<script src="app/store.js?v=202611041138"></script>
-<script src="app/biblio.js?v=202611041138"></script>
-<script src="app/scan.js?v=202611041138"></script>
-<script src="app/ui.js?v=202611041138"></script>
-<script src="app/lib.js?v=202611041138"></script>
-<script src="app/booklog.js?v=202611041138"></script>
+<script src="app/store.js?v=202611091504"></script>
+<script src="app/biblio.js?v=202611091504"></script>
+<script src="app/scan.js?v=202611091504"></script>
+<script src="app/ui.js?v=202611091504"></script>
+<script src="app/lib.js?v=202611091504"></script>
+<script src="app/discs.js?v=202611091504"></script>
+<script src="app/booklog.js?v=202611091504"></script>
 <script>
 "use strict";
 const { $, esc } = UI;
@@ -98,7 +99,7 @@ $("tmdbSave").onclick = async () => {
 
 (async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); $("notices").innerHTML = `<p class="small muted">鍵を設定すると表示されます。</p>`; return; }
-  await Shelf.init({ need: ["records/keys.json", "records/library/", "records/queue.json", "records/reading.json", "records/settings.json", "records/novels-checker/books.json", "records/novels-checker/log", "works/novels.json", "works/films.json"] });
+  await Shelf.init({ need: ["records/keys.json", "records/library/", "records/queue.json", "records/reading.json", "records/settings.json", "records/novels-checker/books.json", "records/novels-checker/log", "works/novels.json", "works/films.json", "works/adaptations.json", "records/discs.json"] });
   const ready = () => { const n = Shelf.read(Lib.P.novels), f = Shelf.read(Lib.P.films); if (n) Biblio.setNovels(n); if (f) Biblio.setFilms(f); };
   ready(); Shelf.on(Lib.P.novels, ready); Shelf.on(Lib.P.films, ready);
   Lib.reconcile();
@@ -140,6 +141,11 @@ async function onCode(code) {
   const c = Biblio.classify(code);
   if (c.kind === "lower") { Scan.beep("warn"); show(`<div class="result warn"><div class="big">下段のバーコードです</div><p>上段（978で始まる方）を読んでください。</p></div>`); return; }
   if (c.kind === "label") { Scan.beep("warn"); show(`<div class="result warn"><div class="big">場所ラベル</div><p>${esc(Lib.places()[c.code] || "未登録のラベル")}</p></div>`); return; }
+  if (c.kind === "other" && window.Discs) {
+    const d = Discs.byJan(c.code);
+    if (d) { Scan.beep("dup"); show(`<div class="result own"><div class="big">持っています</div><p><b>${esc(Discs.name(d))}</b>（映画のソフト）</p><p class="small">${esc(Discs.text(d) || "保管場所は未設定")}${d.st === "gone" ? `・<span class="pill warn">手放した</span>` : ""}</p></div>`); return; }
+    Scan.beep("warn"); show(`<div class="result warn"><div class="big">登録していないバーコードです</div><p>本ではありません。映画のDVD・Blu-rayなら、蔵書の「登録」画面で読むと作品を選んで登録できます。</p><p class="mono small">${esc(code)}</p></div>`); return;
+  }
   if (c.kind === "bad" || c.kind === "other") { Scan.beep("ng"); show(`<div class="result warn"><div class="big">本のバーコードではありません</div><p class="mono small">${esc(code)}</p></div>`); return; }
   const my = ++busy;
   show(`<div class="result"><p>調べています…</p></div>`);

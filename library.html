@@ -9,8 +9,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app/ui.css?v=202611041138">
-<link rel="stylesheet" href="app/bar.css?v=202611041138">
+<link rel="stylesheet" href="app/ui.css?v=202611091504">
+<link rel="stylesheet" href="app/bar.css?v=202611091504">
 <style>
 .phthumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .phthumbs figure{margin:0;display:grid;gap:4px;justify-items:center}
@@ -87,6 +87,7 @@
     <a href="#register" data-tab="register">登録</a>
     <a href="#list" data-tab="list">一覧</a>
     <a href="#queue" data-tab="queue">確認待ち<span class="n" id="qCount"></span></a>
+    <a href="#missing" data-tab="missing">欠け巻・新刊<span class="n" id="mCount"></span></a>
     <a href="#stats" data-tab="stats">集計</a>
     <a href="#places" data-tab="places">保管場所</a>
     <a href="#booklog" data-tab="booklog">ブクログから</a>
@@ -114,6 +115,18 @@
     <div id="batchBox" hidden class="card" style="background:var(--bg)">
       <div class="row"><h3 class="grow">ためた番号 <span id="batchN"></span></h3><button type="button" class="pri" id="batchReg">まとめて登録</button><button type="button" class="quiet" id="batchClear">すべて消す</button></div>
       <ul class="list" id="batchList"></ul>
+    </div>
+    <div id="discBox" hidden class="card" style="background:var(--bg)">
+      <h3>映画のソフトとして登録しますか？</h3>
+      <p class="small muted">本ではないバーコード（<span class="mono" id="discJan"></span>）です。DVD・Blu-rayなら、入っている作品を映画チェッカーから選んでください。次からはこのバーコードを読むだけで「所持済み」と出ます。ボックスは作品をいくつでも選べます。</p>
+      <div class="row"><input type="search" id="discQ" class="grow" placeholder="作品名（邦題・原題）で探す" aria-label="作品名で探す"></div>
+      <ul class="list" id="discHits"></ul>
+      <p class="small" id="discSel"></p>
+      <div class="row">
+        <label class="f">種類<select id="discFmt"></select></label>
+        <label class="f grow">ボックスなどの名前（任意）<input type="text" id="discT" placeholder="例：ゴッドファーザー トリロジー"></label>
+      </div>
+      <div class="row"><button type="button" class="pri" id="discReg" disabled>このソフトを登録する</button><button type="button" class="quiet" id="discNo">登録しない</button></div>
     </div>
     <h3>読み取りの記録</h3>
     <div class="log" id="regLog"><p class="muted small">まだありません</p></div>
@@ -178,6 +191,13 @@
   </section>
 
   <!-- 集計 -->
+  <!-- 欠け巻・新刊 -->
+  <section class="panel card" id="p-missing" aria-label="欠け巻・新刊" hidden>
+    <p class="small muted">シリーズごとに、持っていない巻と、新しく出た巻を出します。既刊数と完結は、Claudeの定期タスクが週1回、国立国会図書館や出版社の情報で更新します（手で直した既刊数は上書きしません）。</p>
+    <div class="row"><div class="seg" role="group" aria-label="出すもの"><button type="button" id="msNew" aria-pressed="true">新刊・欠け巻があるもの</button><button type="button" id="msAll" aria-pressed="false">すべてのシリーズ</button></div><span class="small muted grow" id="msNote"></span></div>
+    <ul class="list" id="missList"></ul>
+  </section>
+
   <section class="panel card" id="p-stats" aria-label="集計" hidden><div id="stats"></div></section>
 
   <!-- 保管場所 -->
@@ -229,14 +249,15 @@
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-<script src="app/store.js?v=202611041138"></script>
-<script src="app/biblio.js?v=202611041138"></script>
-<script src="app/scan.js?v=202611041138"></script>
-<script src="app/ui.js?v=202611041138"></script>
-<script src="app/lib.js?v=202611041138"></script>
-<script src="app/booklog.js?v=202611041138"></script>
-<script src="app/fixes.js?v=202611041138"></script>
-<script src="app/library.js?v=202611041138"></script>
-<script src="app/photos.js?v=202611041138"></script>
+<script src="app/store.js?v=202611091504"></script>
+<script src="app/biblio.js?v=202611091504"></script>
+<script src="app/scan.js?v=202611091504"></script>
+<script src="app/ui.js?v=202611091504"></script>
+<script src="app/lib.js?v=202611091504"></script>
+<script src="app/discs.js?v=202611091504"></script>
+<script src="app/booklog.js?v=202611091504"></script>
+<script src="app/fixes.js?v=202611091504"></script>
+<script src="app/library.js?v=202611091504"></script>
+<script src="app/photos.js?v=202611091504"></script>
 </body>
 </html>

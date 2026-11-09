@@ -14,6 +14,8 @@
 | `records/library/0.json` 〜 `f.json` | 蔵書。1冊、または1シリーズが1件。記録の番号で16のファイルに分ける | アプリ・Claude |
 | `records/reading.json` | チェッカーに無い本（蔵書の本・シリーズの巻）の読了 | アプリ・Claude |
 | `records/queue.json` | 確認待ち | アプリ・Claude |
+| `records/discs.json` | 映画のソフト（DVD・Blu-ray・ボックス）の所有。`{items:{番号:{id, jan, fks:[映画の作品番号], t, fmt, box, loc, note, st, src, added, u}}}`（2026-11-09） | アプリ |
+| `works/adaptations.json` | 原作と映画の対応表。必読書の作品（n）と映画の作品（f）の組と、表示用の書名・題名（2026-11-09） | Claude |
 | `records/settings.json` | 保管場所の一覧と場所ラベルの番号、表示の設定 | アプリ |
 | `tasks/` | Claudeの定期タスクの作業状態（書誌確認の待ち行列など） | Claude |
 | `import/` | 移行前の写し。書き換えない | — |
@@ -60,7 +62,7 @@
 | `fm` | 同じ本の版の一覧（単行本・文庫・分冊・出版社違い・紙と電子）。版ごと・分冊の巻ごとに所有の印 `own` を持つ。記録の `isbn`・`fmt`・`pub` などは最初に登録した版のまま | `[{"k":"f1","fmt":"単行本","pub":"集英社","parts":[{"v":"","isbn":"978…","own":1}]},{"k":"f2","fmt":"文庫","parts":[{"v":"上","isbn":"978…","own":1},{"v":"下","own":1}]}]` |
 | `alt` | （旧）別の版の一覧。`fm` に置き換えた。残っていれば、開いたときに `fm` に移す | |
 | `blk` | ブクログの記録から読了を取り込んだ印 | |
-| `total`, `done` | シリーズの既刊数、完結 | |
+| `total`, `done` | シリーズの既刊数、完結。週1回の定期タスクが調べて入れる（`totalAuto`・`doneAuto` が自動で入れた印。手で直すと印が外れ、以後は上書きしない）。`totalAt` 確かめた日、`totalSrc` 出典、`totalTry` 確かめきれなかった日、`totalPrev`・`totalUp` 既刊数が増えたときの前の値と日 | |
 | `added`, `u` | 登録日時、更新日時 | |
 
 ### 本の読書の状況
