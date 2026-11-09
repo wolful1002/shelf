@@ -23,7 +23,7 @@
 .shelfbar .sb-sync[data-state="pending"],.shelfbar .sb-sync[data-state="offline"]{color:var(--sb-warn)}
 .shelfbar .sb-sync[data-state="error"],.shelfbar .sb-sync[data-state="notoken"]{color:var(--sb-ng)}
 .shelfbar .sb-sync[data-state="error"]::before,.shelfbar .sb-sync[data-state="notoken"]::before{background:var(--sb-ng)}
-@media (max-width:420px){.shelfbar .sb-brand{display:none}.shelfbar nav a{padding:0 8px}}
+@media (max-width:420px){.shelfbar .sb-brand{display:none}.shelfbar nav{overflow-x:auto;scrollbar-width:none}.shelfbar nav a{padding:0 6px}}
 /* 帯の下に、各画面の固定表示の絞り込み欄が来るようにする */
 .controls{top:calc(44px + env(safe-area-inset-top, 0px)) !important}
 body{margin:0}

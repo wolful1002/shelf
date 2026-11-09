@@ -373,9 +373,21 @@ function buildControls(){
   $("decade").innerHTML = `<option value="">全年代</option>` + decs.map(d=>`<option value="${d}">${d}年代</option>`).join("");
   const cc = {}; films.forEach(f=>(f.c||"").split("/").filter(Boolean).forEach(c=>cc[c]=(cc[c]||0)+1));
   $("country").innerHTML = `<option value="">全製作国</option>` + Object.entries(cc).sort((a,b)=>b[1]-a[1]).map(([c,n])=>`<option value="${c}">${CN[c]||c}（${n}）</option>`).join("");
-  const sc = {}; for(const f of films) for(const x of ((f.v && f.v.sub) || [])) sc[x] = (sc[x]||0)+1;
+  const sc = {}; for(const f of films) for(const x of new Set([...((f.p && f.p.sub) || []), ...((f.v && f.v.sub) || [])])) sc[x] = (sc[x]||0)+1;
   for(const [,nm] of SVC) if(nm !== "その他" && !(nm in sc)) sc[nm] = 0;
   $("svcOpts").innerHTML = Object.entries(sc).sort((a,b)=>b[1]-a[1]).map(([nm])=>`<option value="s:${esc(nm)}">${esc(nm)}で見放題</option>`).join("");
+  // 契約中の配信サービス：見放題の作品が10本以上あるサービスを並べる
+  const svcNames = Object.entries(sc).filter(([,n])=>n>=10).sort((a,b)=>b[1]-a[1]).map(([nm])=>nm);
+  const drawMySvc = () => { const m = new Set(mySvc()); $("mySvc").innerHTML = svcNames.map(nm=>`<button type="button" class="pill" data-my="${esc(nm)}" aria-pressed="${m.has(nm)}">${esc(nm)}</button>`).join("") };
+  drawMySvc();
+  $("mySvc").addEventListener("click", e=>{
+    const b = e.target.closest("[data-my]"); if(!b || !window.Shelf) return;
+    const P = "records/services.json", nm = b.dataset.my;
+    if(!Shelf.read(P)) Shelf.writeDoc(P, {items: Object.fromEntries(MYSVC_DEF.map(s=>[s,{on:1}]))});
+    const on = !mySvc().includes(nm);
+    Shelf.writeItem(P, nm, on ? {on:1} : null);
+    drawMySvc(); renderList(); renderPick();
+  });
   $("stats").addEventListener("click", e=>{ const j = e.target.closest(".jmp"); if(j) navigate(j.dataset.k, "__stats") });
   for(const [id,key] of [["country","country"],["jpf","jp"],["rec","rec"],["adp","adp"]])
     $(id).addEventListener("change", e=>{ state[key]=e.target.value; state.shown=PAGE; renderList() });
@@ -508,6 +520,7 @@ function filtered(){
     if(state.country && !(f.c||"").split("/").includes(state.country)) return false;
     if(state.jp && f.j!==state.jp) return false;
     if(state.rec==="sub" && !subOf(f).length) return false;
+    if(state.rec==="mine" && !mySubOf(f).length) return false;
     if(state.rec==="any" && !vodAny(f)) return false;
     if(state.rec==="nostream" && !(f.v && !vodAny(f))) return false;
     if(state.rec==="unk" && vodKnown(f)) return false;
@@ -539,30 +552,48 @@ const CHECK = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke
 const atJa = at => at ? `${at.slice(0,4)}年${+at.slice(5,7)}月` : "";
 // months since the survey; past 3 months the result is shown as "needs a fresh look"
 const ageM = at => { if(!at) return 0; const d = new Date(); return (d.getFullYear()*12 + d.getMonth()) - (+at.slice(0,4)*12 + (+at.slice(5,7)-1)) };
-const stale = f => !!(f.v && ageM(f.v.at) > 3);
+// 配信の情報は2つ：Claude調べ（Filmarks、月1回・v）と、TMDB（配信先は JustWatch 由来、週1回の自動更新・p）。両方を合わせて使う
+// 新しい方の情報が3か月より古いときは「要再確認」
+const latestAt = f => [f.v && f.v.at, f.p && f.p.at].filter(Boolean).sort().pop() || "";
+const stale = f => !!((f.v || f.p) && ageM(latestAt(f)) > 3);
 const ownSvc = f => ((info[f.k] && info[f.k].st) || []).map(id=>SVCN[id]).filter(Boolean);
-const subOf = f => [...new Set([...((f.v && f.v.sub) || []), ...ownSvc(f)])];
-const paidOf = f => f.v ? [...new Set([...f.v.rent, ...f.v.buy])] : [];
+const subOf = f => [...new Set([...((f.p && f.p.sub) || []), ...((f.v && f.v.sub) || []), ...ownSvc(f)])];
+const paidOf = f => [...new Set([...((f.p && f.p.rent) || []), ...((f.p && f.p.buy) || []), ...((f.v && f.v.rent) || []), ...((f.v && f.v.buy) || [])])];
 const vodAny = f => subOf(f).length > 0 || paidOf(f).length > 0;
-const vodKnown = f => !!f.v || ownSvc(f).length > 0;
+const vodKnown = f => !!f.v || !!f.p || ownSvc(f).length > 0;
+// 契約中の配信サービス（records/services.json。初めは Prime Video と U-NEXT）
+const MYSVC_DEF = ["Prime Video","U-NEXT"];
+const mySvc = () => { const d = window.Shelf && Shelf.read("records/services.json"); const it = d && d.items; return it ? Object.keys(it).filter(k=>it[k] && it[k].on) : MYSVC_DEF };
+const mySubOf = f => { const m = new Set(mySvc()); return subOf(f).filter(s=>m.has(s)) };
+const srcText = f => [f.p ? `TMDB（JustWatch、${f.p.at}時点）` : "", f.v ? `Claude調べ（Filmarks、${atJa(f.v.at)}時点）` : "", ownSvc(f).length ? `自分の記録：${ownSvc(f).join("、")}` : ""].filter(Boolean).join("／") + (stale(f) ? "・要再確認" : "");
 function vodTag(f){
-  const subs = subOf(f), v = f.v, own = ownSvc(f);
+  const subs = subOf(f), mine = mySubOf(f);
   if(!vodKnown(f)) return "";
   const old = stale(f) ? " old" : "";
-  const src = [v ? `Claude調べ（Filmarks、${atJa(v.at)}時点${stale(f) ? "・要再確認" : ""}）` : "", own.length ? `自分の記録：${own.join("、")}` : ""].filter(Boolean).join("／");
+  const src = srcText(f);
+  if(mine.length) return `<span class="vod mine${old}" title="契約中のサービスで見放題：${esc(mine.join("、"))}／見放題のすべて：${esc(subs.join("、"))}／${esc(src)}">契約中で見放題 ${esc(mine.join("・"))}${old ? " ？" : ""}</span>`;
   if(subs.length) return `<span class="vod${old}" title="見放題：${esc(subs.join("、"))}／${esc(src)}">見放題 ${esc(subs.slice(0,2).join("・"))}${subs.length>2?" ほか":""}${old ? " ？" : ""}</span>`;
-  if(paidOf(f).length) return `<span class="vod r${old}" title="レンタル：${esc(v.rent.join("、")||"なし")}／購入：${esc(v.buy.join("、")||"なし")}／${esc(src)}">レンタル・購入のみ${old ? " ？" : ""}</span>`;
-  return `<span class="vod x${old}" title="${esc(src)}">配信なし${v && v.dc?"・宅配レンタルあり":""}${old ? " ？" : ""}</span>`;
+  if(paidOf(f).length) return `<span class="vod r${old}" title="レンタル・購入：${esc(paidOf(f).join("、"))}／${esc(src)}">レンタル・購入のみ${old ? " ？" : ""}</span>`;
+  return `<span class="vod x${old}" title="${esc(src)}">配信なし${f.v && f.v.dc?"・宅配レンタルあり":""}${old ? " ？" : ""}</span>`;
+}
+function tmdbBlock(f){
+  const p = f.p; if(!p) return "";
+  const L = a => a && a.length ? esc(a.join("、")) : "なし";
+  const m = new Set(mySvc());
+  const S = a => a && a.length ? a.map(s=>m.has(s) ? `<b>${esc(s)}</b>（契約中）` : esc(s)).join("、") : "なし";
+  return `<h4>配信状況（TMDB・${esc(p.at)}時点、週1回の自動更新）</h4><dl>
+      <dt>見放題</dt><dd>${S(p.sub)}</dd>${p.ads ? `<dt>広告つき無料</dt><dd>${L(p.ads)}</dd>` : ""}${p.ch ? `<dt>追加チャンネル</dt><dd>${L(p.ch)}<span class="mm">　Prime Video の別料金のチャンネル</span></dd>` : ""}<dt>レンタル</dt><dd>${L(p.rent)}</dd><dt>購入</dt><dd>${L(p.buy)}</dd></dl>
+    <p class="note">配信情報：JustWatch（TMDB経由）。${f.tm ? `<a href="https://www.themoviedb.org/movie/${f.tm}/watch?locale=JP" target="_blank" rel="noopener" style="color:var(--accent)">TMDBの配信ページ</a>` : ""}</p>`;
 }
 function vodBlock(f){
-  const v = f.v; if(!v) return "";
+  const v = f.v; if(!v) return tmdbBlock(f);
   const L = a => a.length ? esc(a.join("、")) : "なし";
   const link = v.fid ? (String(v.fid).includes("/") ? `https://filmarks.com/${v.fid}/vod` : `https://filmarks.com/movies/${v.fid}/vod`) : "";
   const lnk = txt => link ? `<a href="${link}" target="_blank" rel="noopener" style="color:var(--accent)">${txt}</a>` : txt;
-  return `<h4>配信状況（Claude調べ・${atJa(v.at)}時点）${stale(f) ? ` <span class="unsure">要再確認</span>` : ""}</h4><dl>
+  return tmdbBlock(f) + `<h4${f.p ? ` style="margin-top:14px"` : ""}>配信状況（Claude調べ・${atJa(v.at)}時点）${v && ageM(v.at) > 3 ? ` <span class="unsure">要再確認</span>` : ""}</h4><dl>
       <dt>見放題</dt><dd>${L(v.sub)}</dd><dt>レンタル</dt><dd>${L(v.rent)}</dd><dt>購入</dt><dd>${L(v.buy)}</dd>
       <dt>宅配レンタル</dt><dd>${v.dc ? "TSUTAYA DISCAS（DVD/BD）" : "掲載なし"}</dd></dl>
-    <p class="note">${v.nf ? `Filmarksに作品ページが見つからなかったため、配信なしとして記録しました（${atJa(v.at)}時点）。` : stale(f) ? `調べてから${ageM(v.at)}か月たっています。配信は入れ替わるので、${lnk("Filmarksの配信ページ")}で今の状況を確かめてください。` : `Filmarksの配信ページを元に記録しました。配信は入れ替わるので、観る前に${lnk("最新の状況")}を確認してください。`}</p>`;
+    <p class="note">${v.nf ? `Filmarksに作品ページが見つからなかったため、配信なしとして記録しました（${atJa(v.at)}時点）。` : ageM(v.at) > 3 ? `調べてから${ageM(v.at)}か月たっています。配信は入れ替わるので、${lnk("Filmarksの配信ページ")}で今の状況を確かめてください。` : `Filmarksの配信ページを元に記録しました。配信は入れ替わるので、観る前に${lnk("最新の状況")}を確認してください。`}</p>`;
 }
 // ---------- other films by the same director ----------
 const dirsOf = f => (f.d || "").split(/[、,／\/]| と /).map(s=>s.trim()).filter(Boolean);
@@ -841,6 +872,7 @@ function pickPool(){
     if(dec && decOf(f) !== +dec) return false;
     if(cty && !(f.c||"").split("/").includes(cty)) return false;
     if(vod === "sub" && !subOf(f).length) return false;
+    if(vod === "mine" && !mySubOf(f).length) return false;
     if(vod === "any" && !vodAny(f)) return false;
     if(onlyWant && !want[f.k]) return false;
     if(len && (!f.rt || (len > 150 ? f.rt <= 150 : f.rt > len))) return false;
@@ -872,9 +904,10 @@ function renderPick(){
   }
   const v = f.v;
   const subs = subOf(f), own = ownSvc(f);
-  const when = v ? `<span>（${own.length ? "Claude調べと自分の記録・" : "Claude調べ・"}${atJa(v.at)}時点${stale(f) ? "・要再確認" : ""}）</span>` : own.length ? `<span>（自分の記録）</span>` : "";
+  const mine = mySubOf(f);
+  const when = vodKnown(f) ? `<span>（${esc(srcText(f))}）</span>` : "";
   const vodLine = !vodKnown(f) ? "配信：未調査（詳細からJustWatch・Filmarksで確認できます）"
-    : (subs.length ? `見放題：${esc(subs.join("・"))}` : paidOf(f).length ? `レンタル・購入：${esc(paidOf(f).join("・"))}` : `配信なし${v && v.dc ? "（TSUTAYA DISCASの宅配レンタルあり）" : ""}`) + when;
+    : (mine.length ? `契約中で見放題：${esc(mine.join("・"))}${subs.length > mine.length ? `（ほかに ${esc(subs.filter(s=>!mine.includes(s)).join("・"))}）` : ""}` : subs.length ? `見放題：${esc(subs.join("・"))}` : paidOf(f).length ? `レンタル・購入：${esc(paidOf(f).join("・"))}` : `配信なし${v && v.dc ? "（TSUTAYA DISCASの宅配レンタルあり）" : ""}`) + when;
   $("pickCard").innerHTML = `<div style="min-width:0;display:flex;flex-direction:column;gap:4px">
       <div class="pt">${esc(f.t)}</div>
       <div class="pm"><span>${f.y || "年不明"}</span>${f.rt ? `<span>${f.rt}分</span>` : ""}<span>${esc(f.d || "監督 要確認")}</span><span>${esc(cname(f.c))}</span>${f.en ? `<span>${esc(f.en)}</span>` : ""}</div>

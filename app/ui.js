@@ -7,7 +7,7 @@
   U.today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
   U.nowIso = () => new Date().toISOString();
 
-  const PAGES = [["index.html", "ホーム"], ["library.html", "蔵書"], ["novels.html", "必読書"], ["films.html", "映画"]];
+  const PAGES = [["index.html", "ホーム"], ["library.html", "蔵書"], ["novels.html", "必読書"], ["films.html", "映画"], ["shows.html", "ドラマ・アニメ"]];
   // 上の帯：チェッカーの画面と同じもの（見た目は app/bar.css）
   U.topbar = active => {
     const el = document.createElement("div");
