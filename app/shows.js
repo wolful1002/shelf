@@ -39,6 +39,7 @@ async function fetchShow(id) {
     cat: (d.genres || []).some(g => g.id === 16) ? "アニメ" : "ドラマ", img: d.poster_path || undefined,
     ss: (d.seasons || []).filter(s => s.season_number > 0).map(s => ({ n: s.season_number, eps: s.episode_count, name: s.name, air: s.air_date || undefined })),
     status: ST[d.status] || d.status || "", next: d.next_episode_to_air ? { s: d.next_episode_to_air.season_number, e: d.next_episode_to_air.episode_number, air: d.next_episode_to_air.air_date } : null,
+    rt: (d.episode_run_time || [])[0] || d.last_episode_to_air?.runtime || d.next_episode_to_air?.runtime || undefined,
     p: provOf(d["watch/providers"]), info: today(),
   };
 }
@@ -137,6 +138,28 @@ function render() {
   $("bigSub").textContent = `観ている ${all.filter(x => x.st === "watching").length}・観たい ${all.filter(x => x.st === "want").length}`;
 }
 
+// ---------- 時間で選ぶ ----------
+// 観ている・観たい作品のうち、放送済みの次の話がある作品を、空いている時間で観られる話数と一緒に出す（契約中のサービスで観られるものを先に）
+function renderTime() {
+  const mins = +$("tMin").value; if (!mins) { $("tList").innerHTML = ""; return; }
+  const mine = new Set(mySvc());
+  const xs = Object.values(items()).filter(it => it.st === "watching" || it.st === "want").map(it => ({ it, s: stats(it) })).filter(x => x.s.next)
+    .map(x => ({ ...x, n: x.it.rt ? Math.floor(mins / x.it.rt) : null, ok: (x.it.p?.sub || []).filter(s => mine.has(s)) }))
+    .filter(x => x.n === null || x.n >= 1)
+    .sort((a, b) => (b.ok.length > 0) - (a.ok.length > 0) || (b.it.st === "watching") - (a.it.st === "watching") || (a.it.rt || 999) - (b.it.rt || 999));
+  $("tList").innerHTML = xs.map(({ it, s, n, ok }) => `<li><div><div class="t">${esc(it.t)}</div><div class="m">
+      <span>シーズン${s.next.s} 第${s.next.e}話から${n ? ` ${Math.min(n, s.all - s.done)}話` : ""}</span><span>${it.rt ? `1話 約${it.rt}分` : "1話の長さは不明"}</span>
+      ${ok.length ? `<span class="vod mine">契約中で見放題 ${esc(ok.join("・"))}</span>` : (it.p?.sub || []).length ? `<span class="vod">見放題 ${esc(it.p.sub.slice(0, 2).join("・"))}</span>` : `<span class="vod x">契約中のサービスでは観られません</span>`}
+      <span>${ST_NM[it.st]}</span></div></div><button type="button" class="small quiet" data-go="${esc(it.id)}">開く</button></li>`).join("") || `<li class="empty">この時間で観られる作品はありません</li>`;
+}
+$("tMin").onchange = renderTime;
+$("tList").addEventListener("click", e => {
+  const b = e.target.closest("[data-go]"); if (!b) return;
+  const it = items()[b.dataset.go]; openId = it.id; FILT.st = it.st;
+  document.querySelectorAll("[data-f]").forEach(x => x.setAttribute("aria-pressed", x.dataset.f === it.st)); render();
+  document.querySelector(`#list li[data-id="${it.id}"]`)?.scrollIntoView({ block: "start" });
+});
+
 // ---------- 操作 ----------
 document.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { FILT.st = b.dataset.f; document.querySelectorAll("[data-f]").forEach(x => x.setAttribute("aria-pressed", x === b)); render(); });
 document.querySelectorAll("[data-c]").forEach(b => b.onclick = () => { FILT.cat = b.dataset.c; document.querySelectorAll("[data-c]").forEach(x => x.setAttribute("aria-pressed", x === b)); render(); });
@@ -194,6 +217,6 @@ $("list").addEventListener("click", async e => {
 (async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); return; }
   await Shelf.init({ need: ["records/shows.json", "records/keys.json", "records/services.json"] });
-  render();
-  Shelf.on(P, () => render());
+  render(); renderTime();
+  Shelf.on(P, () => { render(); renderTime(); });
 })();

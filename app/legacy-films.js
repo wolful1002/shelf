@@ -109,8 +109,10 @@ const dateOf = v => v && v !== NODATE ? v : "";
 const rwOf = k => (rw[k] || []).filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d));
 // every date this film was watched, oldest first (the first viewing may have no date)
 const viewsOf = k => [...new Set([dateOf(seen[k]), ...rwOf(k)].filter(Boolean))].sort();
+const whOf = (k, d) => (wh[k] && wh[k][d || NODATE]) || "";
 const whenTxt = k => { const v = viewsOf(k), n = (seen[k] ? 1 : 0) + rwOf(k).filter(d=>d !== dateOf(seen[k])).length;
-  return (v.length ? `✓ ${v[v.length-1]}` : "✓ 鑑賞済") + (n > 1 ? `（${n}回）` : "") };
+  const last = v.length ? v[v.length-1] : NODATE, w = whOf(k, last);
+  return (v.length ? `✓ ${last}` : "✓ 鑑賞済") + (w ? `・${esc(w)}` : "") + (n > 1 ? `（${n}回）` : "") };
 // is date a (real) earlier than b? an unknown date never replaces a known one
 const earlier = (a, b) => !!dateOf(a) && (!dateOf(b) || a < b);
 let want = {};          // key -> "YYYY-MM-DD"（観たい印を付けた日）
@@ -126,8 +128,9 @@ const $ = id => document.getElementById(id);
 // so a device holding old data can never bring back something removed elsewhere: the newer stamp always wins.
 const LS = "lifetime-films-seen-v1", LSI = "lifetime-films-info-v1", LSW = "lifetime-films-want-v1";
 const LSR = "lifetime-films-rewatch-v1", LST = "lifetime-films-stamps-v2";
-const LSO = "lifetime-films-offlist-v1", LSC = "lifetime-films-custom-v1";
+const LSO = "lifetime-films-offlist-v1", LSC = "lifetime-films-custom-v1", LSH = "lifetime-films-where-v1";
 let rw = {};            // key -> ["YYYY-MM-DD", ...]  2回目以降の鑑賞日
+let wh = {};            // key -> {"YYYY-MM-DD"（日付のない最初の鑑賞は "-"）: "観た場所"}（映画館の名前・配信サービス・手持ちのソフト。2026-11-10）
 let offlist = [];       // [{t, y, d}]  watched films not in any list
 const lsGet = (k, d) => { try{ return JSON.parse(localStorage.getItem(k)||"null") ?? d }catch(e){ return d } };
 const lsSet = (k, v) => { try{ localStorage.setItem(k, JSON.stringify(v)) }catch(e){} };
@@ -139,6 +142,7 @@ const COLS = {
   want: {get:()=>want, set:v=>{ want = v }},
   info: {get:()=>info, set:v=>{ info = v }},
   rw:   {get:()=>rw,   set:v=>{ rw = v }},
+  wh:   {get:()=>wh,   set:v=>{ wh = v }},
   off:  {get:()=>{ const m = {}; for(const o of offlist){ const k = offKey(o); if(!m[k] || earlier(o.d, m[k].d)) m[k] = o } return m }, set:v=>{ offlist = Object.values(v) }},
   cust: {get:()=>customs, set:v=>{ customs = v }},
 };
@@ -146,10 +150,11 @@ const COLS = {
 const TIE = {
   seen: (a,b)=> earlier(b,a) ? b : a,
   rw:   (a,b)=> [...new Set([...(a||[]), ...(b||[])])].sort(),
+  wh:   (a,b)=> ({...(a||{}), ...(b||{})}),
   info: (a,b)=> (b.at||"") > (a.at||"") ? b : a,
   off:  (a,b)=> earlier(b.d,a.d) ? b : a,
 };
-let TS = {seen:{}, want:{}, info:{}, rw:{}, off:{}, cust:{}};
+let TS = {seen:{}, want:{}, info:{}, rw:{}, wh:{}, off:{}, cust:{}};
 let SNAP = {};          // collection -> {key: JSON} as last stamped
 let legacyLocal = false;
 const jsonMap = m => { const o = {}; for(const k of Object.keys(m)) if(m[k] !== undefined) o[k] = JSON.stringify(m[k]); return o };
@@ -177,10 +182,10 @@ function mergeCol(n, L, Lt, R, Rt){
   return {v, t};
 }
 function saveLocal(){
-  lsSet(LS, seen); lsSet(LSI, info); lsSet(LSW, want); lsSet(LSR, rw); lsSet(LSO, offlist); lsSet(LSC, customs); lsSet(LST, TS);
+  lsSet(LS, seen); lsSet(LSI, info); lsSet(LSW, want); lsSet(LSR, rw); lsSet(LSH, wh); lsSet(LSO, offlist); lsSet(LSC, customs); lsSet(LST, TS);
 }
 function loadLocal(){
-  seen = lsGet(LS, {}); info = lsGet(LSI, {}); want = lsGet(LSW, {}); rw = lsGet(LSR, {}); offlist = lsGet(LSO, []); customs = lsGet(LSC, {});
+  seen = lsGet(LS, {}); info = lsGet(LSI, {}); want = lsGet(LSW, {}); rw = lsGet(LSR, {}); wh = lsGet(LSH, {}); offlist = lsGet(LSO, []); customs = lsGet(LSC, {});
   const t = lsGet(LST, null);
   legacyLocal = !t;
   if(t) for(const n of Object.keys(TS)) TS[n] = t[n] || {};
@@ -189,7 +194,7 @@ function loadLocal(){
 }
 // one document per group of collections in data/users/<id>/
 const DOCS = {
-  watched: {names:["seen","want","info","rw"], body:()=>({seen, want, info, rw})},
+  watched: {names:["seen","want","info","rw","wh"], body:()=>({seen, want, info, rw, wh})},
   offlist: {names:["off"], body:()=>({items: offlist})},
   customLists: {names:["cust"], body:()=>({lists: customs})},
 };
@@ -404,8 +409,17 @@ function buildControls(){
     $(id).addEventListener("click", ()=>{ state.watch=v; state.shown=PAGE; syncWatchBtns(); renderList() });
   }
   $("reel").addEventListener("change", e=>{
+    const wi = e.target.closest(".whIn");
+    if(wi){
+      const k = wi.closest(".row").dataset.k, d = wi.dataset.d, v = wi.value.trim();
+      const m = {...(wh[k] || {})}; if(v) m[d] = v; else delete m[d];
+      if(Object.keys(m).length) wh[k] = m; else delete wh[k];
+      commit(); fillWhList(); refreshRow(k); return;
+    }
     const inp = e.target.closest(".seenDate, .addView"); if(!inp) return;
     const li = inp.closest(".row"), k = li.dataset.k; if(!seen[k]) return;
+    // 最初に観た日を変えたら、その日の場所も一緒に移す
+    if(inp.classList.contains("seenDate")){ const od = dateOf(seen[k]) || NODATE, nd = /^\d{4}-\d{2}-\d{2}$/.test(inp.value) ? inp.value : NODATE; if(od !== nd && wh[k] && wh[k][od] !== undefined){ const m = {...wh[k]}; m[nd] = m[od]; delete m[od]; wh[k] = m } }
     const ok = /^\d{4}-\d{2}-\d{2}$/.test(inp.value);
     if(inp.classList.contains("seenDate")) seen[k] = ok ? inp.value : NODATE;
     else if(ok) addView(k, inp.value);
@@ -426,7 +440,8 @@ function buildControls(){
     const tb = e.target.closest(".todayb");
     if(tb){ watchedToday(tb.closest(".row").dataset.k); return }
     const rv = e.target.closest(".rmview");
-    if(rv){ const k = rv.closest(".row").dataset.k; rw[k] = rwOf(k).filter(d=>d !== rv.dataset.d); if(!rw[k].length) delete rw[k]; commit(); refreshRow(k); renderStats(); return }
+    if(rv){ const k = rv.closest(".row").dataset.k; rw[k] = rwOf(k).filter(d=>d !== rv.dataset.d); if(!rw[k].length) delete rw[k];
+      if(wh[k] && wh[k][rv.dataset.d] !== undefined && rv.dataset.d !== dateOf(seen[k])){ const m = {...wh[k]}; delete m[rv.dataset.d]; if(Object.keys(m).length) wh[k] = m; else delete wh[k] } commit(); refreshRow(k); renderStats(); return }
     const wb = e.target.closest(".wantb");
     if(wb){
       const k = wb.closest(".row").dataset.k; toggleWant(k);
@@ -612,6 +627,15 @@ function sameBlock(f){
   return `<div class="full"><h4>同じ監督のリスト内作品 ${xs.length}本（未見 ${todo}本）</h4><ul class="same">${xs.map(g=>
     `<li><button class="jmp" data-k="${g.k}">${esc(g.t)}</button><span class="m">${g.y||"—"}・スコア${Math.round(g.sc)}</span>${seen[g.k] ? `<span class="ok">✓ 鑑賞済</span>` : ""}${!seen[g.k] && want[g.k] ? `<span class="m" style="color:var(--accent)">★ 観たい</span>` : ""}${subOf(g).length ? `<span class="m">見放題あり</span>` : ""}</li>`).join("")}</ul></div>`;
 }
+// 観た場所の候補：これまでに入れた場所（多い順）、契約中の配信サービス、手持ちのソフト
+function fillWhList(){
+  const el = $("whList"); if(!el) return;
+  const c = {};
+  for(const m of Object.values(wh)) for(const v of Object.values(m)) c[v] = (c[v]||0) + 1;
+  for(const o of offlist) if(o.w) c[o.w] = (c[o.w]||0) + 1;
+  const xs = [...Object.entries(c).sort((a,b)=>b[1]-a[1]).map(([v])=>v), ...mySvc(), "手持ちのソフト", "映画館", "テレビ放送"];
+  el.innerHTML = [...new Set(xs)].map(v=>`<option value="${esc(v)}"></option>`).join("");
+}
 // 手持ちのソフト（DVD・Blu-ray）。記録は records/discs.json（app/discs.js）
 const ownDisc = k => !!(window.Discs && Discs.ownedFilm(k).length);
 function discBlock(f){
@@ -646,8 +670,8 @@ function rowHTML(f){
       <div><h4>基本情報</h4><dl>
         <dt>監督</dt><dd>${dir}${f.u && f.d ? ` <span class="unsure">（要確認）</span>` : ""}</dd>
         <dt>製作国</dt><dd>${esc(cname(f.c))}</dd>
-        ${on ? `<dt>鑑賞日</dt><dd><input type="date" class="seenDate dt" value="${dateOf(seen[f.k])}" aria-label="最初に観た日"> <span class="mm">${dateOf(seen[f.k]) ? "最初に観た日" : "空欄なら日付なし"}</span></dd>
-        ${rwOf(f.k).length ? `<dt>再鑑賞</dt><dd class="views">${rwOf(f.k).map(d=>`<span>${d}<button type="button" class="rmview" data-d="${d}" aria-label="${d}の再鑑賞を消す">×</button></span>`).join("")}</dd>` : ""}
+        ${on ? `<dt>鑑賞日</dt><dd><input type="date" class="seenDate dt" value="${dateOf(seen[f.k])}" aria-label="最初に観た日"> <input class="whIn dt" data-d="${dateOf(seen[f.k]) || NODATE}" list="whList" value="${esc(whOf(f.k, dateOf(seen[f.k])))}" placeholder="観た場所" aria-label="最初に観た場所"> <span class="mm">${dateOf(seen[f.k]) ? "最初に観た日" : "空欄なら日付なし"}</span></dd>
+        ${rwOf(f.k).length ? `<dt>再鑑賞</dt><dd class="views">${rwOf(f.k).map(d=>`<span>${d}<input class="whIn dt" data-d="${d}" list="whList" value="${esc(whOf(f.k, d))}" placeholder="観た場所" aria-label="${d}に観た場所" style="width:9em;margin-left:4px"><button type="button" class="rmview" data-d="${d}" aria-label="${d}の再鑑賞を消す">×</button></span>`).join("")}</dd>` : ""}
         <dt>もう一度観た</dt><dd><input type="date" class="addView dt" aria-label="もう一度観た日を足す"> <span class="mm">日付を選ぶと再鑑賞として足します</span></dd>` : ""}
         <dt>公開年</dt><dd>${f.y || "要確認"}${f.note ? `<span class="mm">（${esc(f.note)}）</span>` : ""}</dd>
         <dt>上映時間</dt><dd>${f.rt ? `${f.rt}分${f.rt >= 60 ? `（${Math.floor(f.rt/60)}時間${f.rt%60 ? `${f.rt%60}分` : ""}）` : ""}<span class="mm">　${f.rts === "t" ? "TMDBの登録値" : "Claudeの知識による目安"}</span>` : `<span class="mm">未確認</span>`}</dd>
@@ -857,7 +881,7 @@ function openFromHash(){
   navigate(m[1]);
 }
 addEventListener("hashchange", openFromHash);
-const endBoot = () => { if(!BOOT) return; BOOT = false; renderAll(); openFromHash() };
+const endBoot = () => { if(!BOOT) return; BOOT = false; renderAll(); fillWhList(); openFromHash() };
 setTimeout(endBoot, 2500);
 
 // ---------- today's pick ----------
@@ -1206,7 +1230,7 @@ function renderOff(){
   const q = normT($("offQ").value);
   const arr = offlist.map((o,i)=>({o,i})).filter(x=>!q || normT(x.o.t).includes(q)).sort((a,b)=>(b.o.d||"").localeCompare(a.o.d||""));
   $("offCount").textContent = `${offlist.length}本`;
-  $("offList").innerHTML = arr.slice(0, offShown).map(({o,i})=>`<li data-i="${i}"><span class="ot">${esc(o.t)}${o.y ? ` <span class="od">${o.y}</span>` : ""}</span><span class="od">${o.d ? "鑑賞 "+o.d : ""}</span><button class="offdel">削除</button></li>`).join("") || `<li class="method">まだありません。</li>`;
+  $("offList").innerHTML = arr.slice(0, offShown).map(({o,i})=>`<li data-i="${i}"><span class="ot">${esc(o.t)}${o.y ? ` <span class="od">${o.y}</span>` : ""}</span><span class="od">${o.d ? "鑑賞 "+o.d : ""}${o.w ? "・" + esc(o.w) : ""}</span><button class="offdel">削除</button></li>`).join("") || `<li class="method">まだありません。</li>`;
   $("offMore").hidden = arr.length <= offShown;
 }
 $("wCheck").addEventListener("click", runWatchCheck);
@@ -1238,7 +1262,7 @@ $("dlOffline").addEventListener("click", async ()=>{
   }catch(e){ $("dlOfflineMsg").textContent = "オフライン版を取得できませんでした。少し待ってからもう一度お試しください。" }
 });
 $("bkExport").addEventListener("click", ()=>{
-  const data = JSON.stringify({app:"lifetime-films", version:1, exported:new Date().toISOString(), seen, rw, info, want, customs, offlist, spw:SPW}, null, 1);
+  const data = JSON.stringify({app:"lifetime-films", version:1, exported:new Date().toISOString(), seen, rw, wh, info, want, customs, offlist, spw:SPW}, null, 1);
   offerFile(`Movie_List_Checker_バックアップ_${today()}.json`, data, $("bkMsg"));
 });
 $("bkFile").addEventListener("change", async e=>{
@@ -1249,6 +1273,7 @@ $("bkFile").addEventListener("change", async e=>{
   let ns = 0;
   for(const [k,d] of Object.entries(b.seen||{})){ if(!seen[k]){ seen[k] = d || NODATE; ns++ } else if(earlier(d, seen[k])) seen[k] = d }
   for(const [k,ds] of Object.entries(b.rw||{})) if(seen[k]) for(const d of ds) addView(k, d);
+  for(const [k,m] of Object.entries(b.wh||{})) if(seen[k]) wh[k] = {...m, ...(wh[k]||{})};
   for(const [k,d] of Object.entries(b.want||{})) if(!want[k]) want[k] = d;
   for(const [k,v] of Object.entries(b.info||{})){ if(!info[k] || (v.at||"") > (info[k].at||"")) info[k] = v }
   for(const [id,L] of Object.entries(b.customs||{})) if(!customs[id]) customs[id] = L;
@@ -1271,6 +1296,48 @@ $("wFile").addEventListener("change", async e=>{
 $("wSave").addEventListener("click", saveWatch);
 $("wText").addEventListener("input", ()=>{ $("wSave").disabled = true });
 $("offQ").addEventListener("input", ()=>{ offShown = 100; renderOff() });
+// ---------- 観た映画を TMDB で探して記録する（2026-11-10） ----------
+let oaPick = null;
+async function oaSearch(){
+  const q = $("oaQ").value.trim(); if(!q) return;
+  const key = window.Shelf && (Shelf.read("records/keys.json") || {}).tmdb;
+  if(!key){ $("oaHits").innerHTML = `<li class="method">TMDB の鍵がありません。ホームの「外部サービスの鍵」で入れてください。</li>`; return }
+  $("oaHits").innerHTML = `<li class="method">探しています…</li>`;
+  try{
+    const u = new URL("https://api.themoviedb.org/3/search/movie"); u.searchParams.set("query", q); u.searchParams.set("language", "ja-JP"); u.searchParams.set("api_key", key);
+    const r = await (await fetch(u)).json();
+    const byTm = new Map(films.filter(f=>f.tm).map(f=>[f.tm, f]));
+    $("oaHits").innerHTML = (r.results || []).slice(0, 8).map(x=>{ const f = byTm.get(x.id);
+      return `<li><span class="ot">${esc(x.title)} <span class="od">${esc((x.release_date||"").slice(0,4))}</span>${x.original_title && x.original_title !== x.title ? ` <span class="od">${esc(x.original_title)}</span>` : ""}${f ? ` <span class="od">（リストにある作品${seen[f.k] ? "・鑑賞済" : ""}）</span>` : ""}</span><button class="btn" data-oa="${x.id}" data-t="${esc(x.title)}" data-y="${esc((x.release_date||"").slice(0,4))}">選ぶ</button></li>` }).join("") || `<li class="method">見つかりません。原題でも探せます。</li>`;
+  }catch(e){ $("oaHits").innerHTML = `<li class="method">TMDB に問い合わせられませんでした。</li>` }
+}
+$("oaBtn").addEventListener("click", oaSearch);
+$("oaQ").addEventListener("keydown", e=>{ if(e.key === "Enter") oaSearch() });
+$("oaHits").addEventListener("click", e=>{
+  const b = e.target.closest("[data-oa]"); if(!b) return;
+  const tm = +b.dataset.oa, f = films.find(x=>x.tm === tm);
+  oaPick = {tm, t:b.dataset.t, y:+b.dataset.y || 0, k: f ? f.k : null};
+  $("oaT").textContent = f ? f.t : oaPick.t;
+  $("oaNote").textContent = f ? (seen[f.k] ? "リストにある作品です。もう一度観た記録として足します" : "リストにある作品です。鑑賞済みにします") : `${oaPick.y || ""}　リスト外の作品として記録します`;
+  $("oaD").value = today(); $("oaW").value = ""; $("oaForm").hidden = false; $("oaW").focus();
+});
+$("oaCancel").addEventListener("click", ()=>{ $("oaForm").hidden = true; oaPick = null });
+$("oaAdd").addEventListener("click", ()=>{
+  if(!oaPick) return;
+  const d = /^\d{4}-\d{2}-\d{2}$/.test($("oaD").value) ? $("oaD").value : NODATE, w = $("oaW").value.trim();
+  if(oaPick.k){
+    const k = oaPick.k;
+    if(d === NODATE){ if(!seen[k]) seen[k] = NODATE } else addView(k, d);
+    if(w) wh[k] = {...(wh[k] || {}), [d]: w};
+    commit(); refreshRow(k); renderSummary(); renderPick();
+    $("oaHits").innerHTML = `<li class="method">『${esc(byKey.get(k).t)}』を鑑賞済みにしました。</li>`;
+  } else {
+    offlist.push({t: oaPick.t, y: oaPick.y, d: d === NODATE ? "" : d, ...(w ? {w} : {}), tm: oaPick.tm});
+    commit(); renderOff();
+    $("oaHits").innerHTML = `<li class="method">『${esc(oaPick.t)}』をリスト外の鑑賞として記録しました。</li>`;
+  }
+  $("oaForm").hidden = true; $("oaQ").value = ""; oaPick = null; fillWhList();
+});
 $("offMore").addEventListener("click", ()=>{ offShown += 300; renderOff() });
 $("offList").addEventListener("click", e=>{
   const b = e.target.closest(".offdel"); if(!b) return;
