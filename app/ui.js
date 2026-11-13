@@ -15,7 +15,9 @@
     el.innerHTML = `<div class="sb-in"><a class="sb-brand" href="index.html">shelf</a><nav aria-label="画面">${PAGES.map(([h, n]) => `<a href="${h}"${h === active ? ' aria-current="page"' : ""}>${n}</a>`).join("")}</nav><span class="sb-sync" id="shelfSync" role="status">…</span></div>`;
     document.body.prepend(el);
     // 狭い画面で帯を横に送るとき、今の画面の名前が見えるようにする
-    const cur = el.querySelector('[aria-current="page"]'); if (cur) { const nav = cur.parentElement; nav.scrollLeft = Math.max(0, cur.offsetLeft - nav.clientWidth / 2 + cur.offsetWidth / 2); }
+    const cur = el.querySelector('[aria-current="page"]');
+    const center = () => { if (cur) { const nav = cur.parentElement; nav.scrollLeft = Math.max(0, cur.offsetLeft - nav.offsetLeft - nav.clientWidth / 2 + cur.offsetWidth / 2); } };
+    center(); (document.fonts?.ready || Promise.resolve()).then(center);
     const pill = el.querySelector("#shelfSync");
     Shelf.onStatus(s => {
       const m = { ok: "保存済み", idle: "準備中", syncing: s.msg || "通信中", pending: `送信待ち ${s.pending}件`, offline: s.pending ? `電波なし・送信待ち ${s.pending}件` : "電波なし", error: "保存できていません", notoken: "鍵が未設定" };
