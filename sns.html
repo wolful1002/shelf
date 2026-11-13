@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SNSの感想 — shelf</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="app/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="app/ui.css?v=202611131208">
+<link rel="stylesheet" href="app/bar.css?v=202611131208">
+<style>
+.post{font-size:13.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;background:var(--bg);border-left:3px solid var(--line);padding:6px 10px;border-radius:0 4px 4px 0;margin:4px 0}
+.post .pm{display:block;font-size:12px;color:var(--muted);white-space:normal}
+.post mark{background:var(--acc-soft,#f3e6c4);color:inherit;padding:0 1px}
+.list li.cand{display:flex;gap:10px;align-items:flex-start}
+.cand>input[type=checkbox]{flex:none;width:22px;height:22px;margin:2px 0 0;padding:0}
+.cand>div{flex:1;min-width:0}
+.cand label{cursor:pointer}
+.cand .t{font-weight:700}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.choice{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.sticky{position:sticky;bottom:0;z-index:2;background:var(--card);border-top:1px solid var(--line);padding:8px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.sticky button{padding:6px 10px}
+</style>
+</head>
+<body>
+<main class="wrap" id="main">
+  <header class="phead">
+    <div>
+      <div class="eyebrow">SNS · 自分の感想</div>
+      <h1>SNSの感想</h1>
+      <p class="lede">X・Mastodon・Bluesky の自分の投稿から、作品名と「読んだ」「観た」などの書き方を手がかりに、読了・鑑賞の候補を出しています。確かめてから、まとめて記録に付けます。記録はここで確定するまで変わりません。</p>
+    </div>
+    <div class="meter"><div class="big" id="bigN">–</div><div class="sub" id="bigSub">投稿</div></div>
+  </header>
+
+  <nav class="tabs card noprint" aria-label="表示するもの">
+    <div class="seg" role="group">
+      <button type="button" data-tab="cand" aria-pressed="true">読了・鑑賞の候補<span class="n" id="nCand"></span></button>
+      <button type="button" data-tab="ask" aria-pressed="false">結び付けに迷うもの<span class="n" id="nAsk"></span></button>
+      <button type="button" data-tab="none" aria-pressed="false">記録にない作品<span class="n" id="nNone"></span></button>
+    </div>
+    <span class="small muted" id="at"></span>
+  </nav>
+
+  <section class="card" id="p-cand">
+    <div class="row">
+      <div class="seg" role="group" aria-label="候補の種類">
+        <button type="button" data-k="done" aria-pressed="true">読んだ・観た</button>
+        <button type="button" data-k="again" aria-pressed="false">読み返した・観直した</button>
+        <button type="button" data-k="now" aria-pressed="false">読む・観る（現在形）</button>
+        <button type="button" data-k="want" aria-pressed="false">読みたい・観たい</button>
+      </div>
+      <span class="small muted grow" id="candNote"></span>
+    </div>
+    <ul class="list" id="candList"></ul>
+    <div class="sticky">
+      <button type="button" class="pri" id="candOk">選んだものを記録に付ける</button>
+      <button type="button" class="quiet" id="candNo">選んだものは違う</button>
+      <span class="grow"></span>
+      <button type="button" class="small quiet" id="selAll">すべて選ぶ</button>
+      <button type="button" class="small quiet" id="selNone">外す</button>
+    </div>
+  </section>
+
+  <section class="card" id="p-ask" hidden>
+    <p class="small muted">同じ題名の作品が記録に複数あるか、「観た」と書いてあるのに本しか無いなど、どれのことか決められなかった投稿です。どの作品の感想かを選んでください。選んだ結び付けは次から自動で使います。</p>
+    <ul class="list" id="askList"></ul>
+  </section>
+
+  <section class="card" id="p-none" hidden>
+    <p class="small muted">投稿に作品名はあるが、蔵書・必読書・映画・ドラマとアニメのどれにも見つからなかった作品です。言及の多い順。記録に足すと、次の照合から結び付きます。</p>
+    <div class="row"><input type="search" id="noneQ" class="grow" placeholder="作品名で絞り込む" aria-label="作品名で絞り込む"></div>
+    <ul class="list" id="noneList"></ul>
+    <button type="button" id="noneMore" hidden>さらに表示</button>
+  </section>
+</main>
+
+<script src="app/store.js?v=202611131208"></script>
+<script src="app/ui.js?v=202611131208"></script>
+<script src="app/lib.js?v=202611131208"></script>
+<script src="app/sns.js?v=202611131208"></script>
+</body>
+</html>

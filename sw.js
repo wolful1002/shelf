@@ -1,9 +1,9 @@
 // 電波がないときも画面を開けるよう、アプリのファイルを端末に置いておく
 // 記録そのものは store.js が端末の保存領域に持つ
-const V = "shelf-202611091544";
-const APP = ["./", "index.html", "library.html", "novels.html", "films.html", "shows.html", "manifest.webmanifest",
+const V = "shelf-202611131208";
+const APP = ["./", "index.html", "library.html", "novels.html", "films.html", "shows.html", "sns.html", "manifest.webmanifest",
   "app/ui.css", "app/bar.css", "app/ui.js", "app/store.js", "app/biblio.js", "app/scan.js", "app/lib.js", "app/booklog.js", "app/fixes.js", "app/library.js", "app/photos.js",
-  "app/legacy-novels.js", "app/legacy-films.js", "app/adapt.js", "app/discs.js", "app/shows.js", "app/icon.svg"];
+  "app/legacy-novels.js", "app/legacy-films.js", "app/adapt.js", "app/discs.js", "app/shows.js", "app/sns.js", "app/icon.svg"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(V).then(c => c.addAll(APP)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", e => {

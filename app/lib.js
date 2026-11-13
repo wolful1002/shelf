@@ -54,7 +54,7 @@
       for (const [id, v] of Object.entries(ch)) { if (v === null) delete d.items[id]; else d.items[id] = v; }
       Shelf.writeDoc(path, d); files++;
     }
-    Shelf.writeDoc(P.queue, { items: B.queue }); files++;
+    if (JSON.stringify(B.queue) !== JSON.stringify(Shelf.read(P.queue)?.items || {})) { Shelf.writeDoc(P.queue, { items: B.queue }); files++; }
     if (B.ndoc) { Shelf.writeDoc(P.novelDoc, B.ndoc); files++; }
     if (B.reading) { Shelf.writeDoc(P.reading, { items: B.reading }); files++; }
     B = null; cache = null;
@@ -381,6 +381,7 @@
     Shelf.writeDoc(P.novelDoc, d);
   }
   L.setOwn = (k, on) => writeNdoc(d => { if (on) d.own[k] = 1; else delete d.own[k]; });
+  L.editNdoc = fn => writeNdoc(fn);   // 読了・読みたい・読み返した日（rr）をまとめて直す
   L.setNovelRead = (k, val) => writeNdoc(d => { if (val) { d.read[k] = val; delete d.want[k]; } else delete d.read[k]; });
 
   // ---------- 読書の状況（チェッカーに結び付かない本） ----------
