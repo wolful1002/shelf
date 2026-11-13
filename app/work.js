@@ -131,7 +131,10 @@ function showPage(id) {
   const it = shows()[id]; if (!it) return notFound();
   const all = (it.ss || []).reduce((n, s) => n + (s.eps || 0), 0), done = Object.values(it.w || {}).reduce((n, a) => n + a.length, 0);
   const ST = { watching: "観ている", want: "観たい", done: "観終わった", stop: "中断" };
-  const seasons = (it.ss || []).map(s => `シーズン${s.n}：${(it.w?.[s.n] || []).length}/${s.eps}話`).join("<br>");
+  const seasons = (it.ss || []).map(s => {
+    const ds = Object.entries(it.wd || {}).filter(([k]) => +k.split("-")[0] === s.n).map(([, d]) => d).sort();
+    return `シーズン${s.n}：${(it.w?.[s.n] || []).length}/${s.eps}話${ds.length ? `（${ds[0]}${ds.length > 1 && ds[ds.length - 1] !== ds[0] ? "〜" + ds[ds.length - 1] : ""}）` : ""}${it.wh?.[s.n] ? `　${esc(it.wh[s.n])}` : ""}`;
+  }).join("<br>");
   return head(it.cat || "ドラマ・アニメ", it.t, esc([it.ot !== it.t ? it.ot : "", it.y].filter(Boolean).join("・")), `<span class="pill">${ST[it.st] || ""}</span>`)
     + card("観た記録", kv([["状況", ST[it.st] || ""], ["観た話数", `${done}/${all}話`], ["シーズンごと", seasons], ["次の放送", it.next ? `シーズン${it.next.s} 第${it.next.e}話 ${esc(it.next.air || "")}` : ""], ["放送", esc(it.status || "")]]), `<a href="shows.html#id=${encodeURIComponent(id)}">ドラマ・アニメで開く</a>`)
     + card("配信", vodHTML(it.p))

@@ -1,6 +1,6 @@
 // 電波がないときも画面を開けるよう、アプリのファイルを端末に置いておく
 // 記録そのものは store.js が端末の保存領域に持つ
-const V = "shelf-202611131639";
+const V = "shelf-202611131644";
 const APP = ["./", "index.html", "library.html", "novels.html", "films.html", "shows.html", "sns.html", "work.html", "manifest.webmanifest",
   "app/ui.css", "app/bar.css", "app/ui.js", "app/store.js", "app/biblio.js", "app/scan.js", "app/lib.js", "app/booklog.js", "app/fixes.js", "app/library.js", "app/photos.js",
   "app/legacy-novels.js", "app/legacy-films.js", "app/adapt.js", "app/discs.js", "app/shows.js", "app/sns.js", "app/mine.js", "app/work.js", "app/tickets.js", "app/icon.svg"];

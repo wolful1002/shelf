@@ -4,13 +4,15 @@
 //        ss:[{n:シーズン, eps:話数, name, air:"YYYY-MM-DD"}]（TMDB。特別編のシーズン0は持たない）, status（放送中／終了など）,
 //        next:{s, e, air}（次に放送される話。TMDB）, p:{sub, rent, buy, ads, ch, at}（国内の配信先。TMDB・JustWatch 由来）, info（TMDB の情報を取った日）,
 //        w:{"シーズン":[観た話の番号]}, st（watching 観ている／want 観たい／done 観終わった／stop 中断）,
-//        newS（新しく増えたシーズン。週1回の更新が付け、本人が確かめたら消す）, added, u}
+//        newS（新しく増えたシーズン。週1回の更新が付け、本人が確かめたら消す）, added, u,
+//        wd:{"シーズン-話":"YYYY-MM-DD"}（観た日。押した話にだけ付く。まとめて付けた前の話には付けない）,
+//        wh:{"シーズン":"観た場所"}（配信サービス・テレビ放送・手持ちのソフトなど。2026-11-14）}
 "use strict";
 const { $, esc } = UI;
 UI.topbar("shows.html");
 const P = "records/shows.json";
 const today = () => UI.today();
-let FILT = { st: "watching", cat: "", mine: false }, openId = null, mode = "upto";
+let FILT = { st: "watching", cat: "", mine: false }, openId = null, mode = "upto", epDate = "";   // epDate：押した話に付ける観た日（空なら今日）
 
 // ---------- TMDB ----------
 const tmKey = () => Shelf.read("records/keys.json")?.tmdb || "";
@@ -64,7 +66,22 @@ function stats(it) {
   }
   return { all, done, next };
 }
-function setEps(it, s, list) { it.w = it.w || {}; const v = [...new Set(list)].sort((a, b) => a - b); if (v.length) it.w[s] = v; else delete it.w[s]; }
+function setEps(it, s, list) {
+  it.w = it.w || {}; const v = [...new Set(list)].sort((a, b) => a - b); if (v.length) it.w[s] = v; else delete it.w[s];
+  // 外した話の観た日は消す
+  if (it.wd) { for (const k of Object.keys(it.wd)) { const [a, b] = k.split("-").map(Number); if (a === +s && !v.includes(b)) delete it.wd[k]; } if (!Object.keys(it.wd).length) delete it.wd; }
+}
+// 押した話に観た日を付ける（観た話になったときだけ）
+function stampEp(it, s, e) { if (!it.w?.[s]?.includes(e)) return; it.wd = it.wd || {}; it.wd[`${s}-${e}`] = epDate || today(); }
+// シーズンの観た日のはじめと終わり
+function daysOf(it, s) { const ds = Object.entries(it.wd || {}).filter(([k]) => +k.split("-")[0] === +s).map(([, d]) => d).sort(); return ds.length ? [ds[0], ds[ds.length - 1]] : null; }
+// 観た場所の候補：これまでに入れた場所・契約中のサービス・配信先・よく使うもの
+function placeList(it) {
+  const xs = new Set();
+  for (const x of Object.values(items())) for (const v of Object.values(x.wh || {})) xs.add(v);
+  for (const v of [...mySvc(), ...(it.p?.sub || []), "テレビ放送", "手持ちのソフト", "映画館"]) xs.add(v);
+  return [...xs];
+}
 function upto(it, sn, en) {
   // そのシーズンのその話まで、それより前のシーズンはすべて観たことにする
   for (const s of it.ss || []) {
@@ -111,12 +128,15 @@ function detHtml(it) {
       <div class="seg" role="group" aria-label="話の押し方"><button type="button" data-mode="upto" aria-pressed="${mode === "upto"}">ここまで観た</button><button type="button" data-mode="one" aria-pressed="${mode === "one"}">1話ずつ</button></div>
       ${it.newS ? `<button type="button" class="small" data-seen-new>新シーズンを確かめた</button>` : ""}
     </div>
-    <p class="small muted">「ここまで観た」で話を押すと、その話までと前のシーズンをまとめて観たことにします。「1話ずつ」は押した話だけを付け外しします。</p>
+    <p class="small muted">「ここまで観た」で話を押すと、その話までと前のシーズンをまとめて観たことにします。「1話ずつ」は押した話だけを付け外しします。押した話には観た日が付きます（まとめて付いた前の話には付けません）。</p>
+    <div class="row"><label class="small">押した話の観た日 <input type="date" class="epDate" value="${esc(epDate)}" max="${today()}" aria-label="押した話の観た日（空なら今日）"></label><span class="small muted">空なら今日</span></div>
+    <datalist id="whl-${esc(it.id)}">${placeList(it).map(v => `<option value="${esc(v)}">`).join("")}</datalist>
     ${(it.ss || []).map(s => {
-      const a = aired(it, s), w = it.w?.[s.n] || [];
+      const a = aired(it, s), w = it.w?.[s.n] || [], ds = daysOf(it, s.n);
       return `<div class="season" data-s="${s.n}"><h3>シーズン${s.n}${s.name && !/^シーズン\s*\d+$|^Season \d+$/.test(s.name) ? `　${esc(s.name)}` : ""}<span class="small muted">${w.length}/${s.eps}話${s.air ? `・${esc(s.air.slice(0, 4))}年` : ""}${a < s.eps ? `・放送済み ${a}話` : ""}</span>
         <span class="row" style="gap:6px;margin-left:auto"><button type="button" class="small quiet" data-all="${s.n}">すべて観た</button><button type="button" class="small quiet" data-none="${s.n}">外す</button></span></h3>
-        <div class="eps">${Array.from({ length: s.eps }, (_, i) => i + 1).map(e => `<button type="button" data-e="${e}" class="${w.includes(e) ? "on" : ""}${e > a ? " fut" : ""}" aria-pressed="${w.includes(e)}" title="第${e}話${e > a ? "（放送前）" : ""}">${e}</button>`).join("")}</div></div>`;
+        <div class="eps">${Array.from({ length: s.eps }, (_, i) => i + 1).map(e => { const d = it.wd?.[`${s.n}-${e}`]; return `<button type="button" data-e="${e}" class="${w.includes(e) ? "on" : ""}${e > a ? " fut" : ""}${d ? " dated" : ""}" aria-pressed="${w.includes(e)}" title="第${e}話${e > a ? "（放送前）" : ""}${d ? "・" + d + "に観た" : ""}">${e}</button>`; }).join("")}</div>
+        <div class="row small"><label>観た場所 <input class="whIn" data-s="${s.n}" list="whl-${esc(it.id)}" value="${esc(it.wh?.[s.n] || "")}" placeholder="配信サービスなど" style="width:12em"></label>${ds ? `<span class="muted">観た日 ${ds[0]}${ds[1] !== ds[0] ? "〜" + ds[1] : ""}</span>` : ""}</div></div>`;
     }).join("")}
     ${window.Mine ? Mine.html(["show:" + it.id]) : ""}
     <dl class="small" style="display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0">
@@ -193,6 +213,15 @@ $("hits").addEventListener("click", async e => {
     document.querySelector(`#list li[data-id="${it.id}"]`)?.scrollIntoView({ block: "start" });
   } catch (err) { UI.toast(err.message); b.disabled = false; b.textContent = "もう一度"; }
 });
+// 押した話の観た日・シーズンの観た場所
+$("list").addEventListener("change", e => {
+  if (e.target.classList.contains("epDate")) { epDate = e.target.value || ""; return; }
+  if (!e.target.classList.contains("whIn")) return;
+  const li = e.target.closest("li[data-id]"); const it = JSON.parse(JSON.stringify(items()[li.dataset.id] || null)); if (!it) return;
+  const s = e.target.dataset.s, v = e.target.value.trim();
+  it.wh = it.wh || {}; if (v) it.wh[s] = v; else delete it.wh[s]; if (!Object.keys(it.wh).length) delete it.wh;
+  put(it); UI.toast(v ? `シーズン${s}の観た場所を「${v}」にしました` : "観た場所を消しました");
+});
 $("list").addEventListener("click", async e => {
   const li = e.target.closest("li[data-id]"); if (!li) return;
   const it = JSON.parse(JSON.stringify(items()[li.dataset.id] || null)); if (!it) return;
@@ -206,7 +235,7 @@ $("list").addEventListener("click", async e => {
     const sn = +ep.closest("[data-s]").dataset.s, en = +ep.dataset.e;
     if (mode === "upto") upto(it, sn, en);
     else { const w = it.w?.[sn] || []; setEps(it, sn, w.includes(en) ? w.filter(x => x !== en) : [...w, en]); }
-    afterMark(it); put(it); redraw(); return;
+    stampEp(it, sn, en); afterMark(it); put(it); redraw(); return;
   }
   const al = e.target.closest("[data-all]"); if (al) { const s = it.ss.find(x => x.n === +al.dataset.all); setEps(it, s.n, Array.from({ length: s.eps }, (_, i) => i + 1)); afterMark(it); put(it); redraw(); return; }
   const no = e.target.closest("[data-none]"); if (no) { setEps(it, +no.dataset.none, []); put(it); redraw(); return; }
