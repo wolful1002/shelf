@@ -5,7 +5,7 @@
 // 記録を書き換えるのは「記録に付ける」を押したときだけ。照合の迷いも本人が選ぶ。
 "use strict";
 const { $, esc } = UI;
-UI.topbar("");
+UI.topbar("sns.html");
 const R = "records/sns/review.json", D = "records/sns/decided.json", W = "records/films-checker/watched.json", S = "records/shows.json";
 const KN = { novel: "必読書", film: "映画", lib: "蔵書", show: "ドラマ・アニメ", off: "リスト外の映画" };
 const KIND = { done: "読んだ・観た", again: "読み返した・観直した", now: "読む・観る", want: "読みたい・観たい" };

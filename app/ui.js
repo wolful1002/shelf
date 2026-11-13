@@ -7,13 +7,15 @@
   U.today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
   U.nowIso = () => new Date().toISOString();
 
-  const PAGES = [["index.html", "ホーム"], ["library.html", "蔵書"], ["novels.html", "必読書"], ["films.html", "映画"], ["shows.html", "ドラマ・アニメ"]];
+  const PAGES = [["index.html", "ホーム"], ["library.html", "蔵書"], ["novels.html", "必読書"], ["films.html", "映画"], ["shows.html", "ドラマ・アニメ"], ["sns.html", "SNS"], ["work.html", "作品"]];
   // 上の帯：チェッカーの画面と同じもの（見た目は app/bar.css）
   U.topbar = active => {
     const el = document.createElement("div");
     el.className = "shelfbar noprint"; el.id = "shelfBar";
     el.innerHTML = `<div class="sb-in"><a class="sb-brand" href="index.html">shelf</a><nav aria-label="画面">${PAGES.map(([h, n]) => `<a href="${h}"${h === active ? ' aria-current="page"' : ""}>${n}</a>`).join("")}</nav><span class="sb-sync" id="shelfSync" role="status">…</span></div>`;
     document.body.prepend(el);
+    // 狭い画面で帯を横に送るとき、今の画面の名前が見えるようにする
+    const cur = el.querySelector('[aria-current="page"]'); if (cur) { const nav = cur.parentElement; nav.scrollLeft = Math.max(0, cur.offsetLeft - nav.clientWidth / 2 + cur.offsetWidth / 2); }
     const pill = el.querySelector("#shelfSync");
     Shelf.onStatus(s => {
       const m = { ok: "保存済み", idle: "準備中", syncing: s.msg || "通信中", pending: `送信待ち ${s.pending}件`, offline: s.pending ? `電波なし・送信待ち ${s.pending}件` : "電波なし", error: "保存できていません", notoken: "鍵が未設定" };

@@ -102,10 +102,12 @@ window.Tickets = (() => {
       return `<li class="tk" data-tk="${esc(t.id)}"><div><a href="${T.workURL(t)}"><b>${esc(T.title(t))}</b></a> <span class="small">${esc(T.when(t))}</span></div>
         <div class="small muted">${esc(T.detail(t))}</div>
         ${ask ? `<div class="small">${rec ? "この日の鑑賞はもう記録にあります。「観た」で館の名前を足します。" : "この回を観ましたか。"}</div>
-        ${hs.map(p => `<div class="small muted tkh">${esc(p.d)}　${esc(p.text.slice(0, 120))}</div>`).join("")}
+        ${hs.slice(0, 2).map(p => `<div class="small muted tkh">${esc(p.d)}　${esc(p.text.slice(0, 120))}</div>`).join("")}
         <div class="row"><button type="button" class="small pri" data-tkv="seen">観た</button><button type="button" class="small quiet" data-tkv="no">観なかった</button></div>` : ""}</li>`;
     };
-    return `${asks.length ? `<h3 class="tkhd">観たか確かめる（${asks.length}件）</h3><ul class="list">${asks.map(t => row(t, true)).join("")}</ul>` : ""}
+    const N = 5;   // 多いときは新しい5件だけ出し、残りは開いて見る
+    return `${asks.length ? `<h3 class="tkhd">観たか確かめる（${asks.length}件）</h3><ul class="list">${asks.slice(0, N).map(t => row(t, true)).join("")}</ul>
+      ${asks.length > N ? `<details><summary class="small">残りの ${asks.length - N}件を開く</summary><ul class="list">${asks.slice(N).map(t => row(t, true)).join("")}</ul></details>` : ""}` : ""}
       ${soon.length ? `<h3 class="tkhd">これからの予約（${soon.length}件）</h3><ul class="list">${soon.map(t => row(t, false)).join("")}</ul>` : ""}`;
   };
   // 欄の中のボタン

@@ -4,7 +4,7 @@
 // このページでは記録を書き換えない。直すときは、それぞれの画面へのリンクから開く。
 "use strict";
 const { $, esc } = UI;
-UI.topbar("");
+UI.topbar("work.html");
 const RD = "records/novels-checker/books.json", WT = "records/films-checker/watched.json", OFF = "records/films-checker/offlist.json", SH = "records/shows.json";
 const isDate = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 const norm = s => {   // tools/sns_match.py の norm と同じ
