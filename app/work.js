@@ -159,24 +159,10 @@ function offPage(t) {
 }
 const notFound = () => `<section class="card"><p>この作品は記録に見つかりませんでした。上で探してください。</p></section>`;
 
-// ---------- 探す ----------
-let IDX = null;
-function index() {
-  if (IDX) return IDX;
-  const xs = [];
-  for (const b of novels().books) xs.push({ h: `work.html?n=${b.k}`, t: b.t, s: [b.a, b.y > 0 ? b.y : ""].filter(Boolean).join("・"), k: "必読書", n: norm([b.t, b.o, b.a].join(" ")) , nt: norm(b.t) });
-  for (const f of films().films) xs.push({ h: `work.html?f=${f.k}`, t: f.t, s: [f.d, f.y].filter(Boolean).join("・"), k: "映画", n: norm([f.t, f.en, f.d].join(" ")), nt: norm(f.t) });
-  for (const it of Object.values(Lib.items())) if (!it.nk && !it.issues) xs.push({ h: `work.html?b=${encodeURIComponent(it.id)}`, t: it.t, s: [it.a, it.label || it.pub].filter(Boolean).join("・"), k: "蔵書", n: norm([it.t, it.a].join(" ")), nt: norm(it.t) });
-  for (const it of Object.values(shows())) xs.push({ h: `work.html?s=${encodeURIComponent(it.id)}`, t: it.t, s: [it.cat, it.y].filter(Boolean).join("・"), k: it.cat || "ドラマ・アニメ", n: norm([it.t, it.ot].join(" ")), nt: norm(it.t) });
-  const seen = new Set();
-  for (const o of Shelf.read(OFF)?.items || []) { const n = norm(o.t); if (seen.has(n)) continue; seen.add(n); xs.push({ h: `work.html?o=${encodeURIComponent(o.t)}`, t: o.t, s: o.y ? String(o.y) : "", k: "リスト外の映画", n, nt: n }); }
-  return IDX = xs;
-}
+// ---------- 探す（app/works.js） ----------
 function search() {
-  const q = norm($("q").value);
-  if (!q) { $("hits").innerHTML = ""; return; }
-  const hs = index().filter(x => x.n.includes(q)).sort((a, b) => (b.nt.startsWith(q) - a.nt.startsWith(q)) || a.nt.length - b.nt.length).slice(0, 30);
-  $("hits").innerHTML = hs.map(x => `<li><a href="${x.h}"><span class="t">${esc(x.t)}</span><span class="tagk">${esc(x.k)}</span><span class="small muted">${esc(x.s)}</span></a></li>`).join("") || `<li class="small muted" style="padding:6px 2px">見つかりません</li>`;
+  const hs = Works.search($("q").value);
+  $("hits").innerHTML = !$("q").value.trim() ? "" : hs.map(x => `<li><a href="${x.h}"><span class="t">${esc(x.t)}</span><span class="tagk">${esc(x.k)}</span><span class="small muted">${esc(x.s)}</span></a></li>`).join("") || `<li class="small muted" style="padding:6px 2px">見つかりません</li>`;
 }
 
 function render() {
@@ -189,13 +175,22 @@ function render() {
   else if (p.get("o")) html = offPage(p.get("o"));
   else html = `<section class="card"><h1 style="margin-top:0">作品のページ</h1><p class="small muted">本・映画・ドラマ・アニメを上で探すと、その作品の読了・鑑賞の記録、蔵書の版と場所、原作・映画化、手持ちのソフト、配信、SNSの感想を1ページで見られます。各画面の作品の詳細にある「作品のページ」からも開けます。</p></section>`;
   $("work").innerHTML = html;
+  // 執筆の欄（資料にした原稿・抜き書き）
+  const tg = Works.fromParams(p);
+  if (tg && html.includes('class="phead"')) { const real = p.get("b") && Lib.get(p.get("b"))?.nk ? "" : tg; if (real) $("work").insertAdjacentHTML("beforeend", Drafts.workHTML(real)); }
 }
 $("q").addEventListener("input", search);
 
 (async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); return; }
-  await Shelf.init({ need: ["works/novels.json", "works/films.json", "works/adaptations.json", "records/library/", "records/reading.json", "records/novels-checker/books.json", "records/films-checker/watched.json", "records/films-checker/offlist.json", "records/shows.json", "records/discs.json", "records/services.json", "records/sns/links.json", "records/settings.json", ...Tickets.paths] });
+  await Shelf.init({ need: ["works/novels.json", "works/films.json", "works/adaptations.json", "records/library/", "records/reading.json", "records/novels-checker/books.json", "records/films-checker/watched.json", "records/films-checker/offlist.json", "records/shows.json", "records/discs.json", "records/services.json", "records/sns/links.json", "records/settings.json", ...Tickets.paths, ...Drafts.paths] });
   render();
   let t = null;
-  Shelf.onAny(() => { clearTimeout(t); t = setTimeout(() => { IDX = null; render(); search(); }, 300); });
+  Shelf.onAny(() => { if (document.activeElement?.closest?.("#wrCard form")) return; clearTimeout(t); t = setTimeout(() => { Works.reset(); render(); search(); }, 300); });
+  Drafts.bind($("work"), render);
+  $("work").addEventListener("click", e => {
+    const tg = Works.fromParams(new URLSearchParams(location.search)), pick = $("wrPick")?.value;
+    if (e.target.closest("[data-wr-add]") && pick) { Drafts.addRef(pick, tg); UI.toast("原稿の資料にしました"); render(); }
+    if (e.target.closest("[data-wr-del]") && pick) { Drafts.delRef(pick, tg); UI.toast("原稿の資料から外しました"); render(); }
+  });
 })();

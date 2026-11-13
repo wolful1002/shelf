@@ -138,3 +138,11 @@
 ## ドラマ・アニメの観た日と場所（2026-11-14）
 
 - `records/shows.json` の作品に `wd:{"シーズン-話":"YYYY-MM-DD"}`（押した話の観た日。まとめて付いた前の話には付けない。外すと消える）と `wh:{"シーズン":"観た場所"}` を足した。作品のページのシーズンごとの行にも出す。
+
+## 執筆（2026-11-14・第3版）
+
+- `records/writing/drafts.json`：原稿 `{items:{番号:{t, memo, added, u}}}`。原稿のファイルは取り込まず、題名で資料と結び付ける。候補は SNS の照合が「自作原稿」として出す題名（`records/sns/review.json` の `drafts`）。
+- `records/writing/refs.json`：原稿の資料 `{items:{"原稿の番号~種類:番号":{d, tg, note, skip?, at}}}`。`skip` は参考文献リストに入れない印。
+- `records/writing/notes.json`：抜き書き `{items:{番号:{tg, text, page, memo, tags, ds, src, at, u}}}`。
+- 作品は `app/works.js` の「種類:番号」（novel・film・lib・show・off）で指す。参考文献の形もここで作る（本：著者『書名』（訳者訳）出版社（レーベル）、刊行年。映画：監督『題名』（製作国、公開年）。）。
+- 画面：`writing.html`（原稿の一覧・抜き書きの一覧）、`writing.html?d=原稿の番号`（資料・抜き書き・参考文献リスト）、作品のページの「執筆」の欄（資料にする原稿・抜き書き）。

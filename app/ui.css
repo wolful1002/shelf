@@ -125,3 +125,9 @@ details>summary{cursor:pointer;font-weight:700}
 .tk .row{margin-top:6px}
 .list>li.tk{display:block;padding:10px 0}
 .tk>div{margin:2px 0}
+/* 抜き書き（app/drafts.js） */
+.list>li.nt{display:block}
+.nt blockquote{margin:0 0 4px;padding:6px 12px;border-left:3px solid var(--accent);background:var(--bg);font-family:"Shippori Mincho B1",serif;font-size:15px;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere}
+.ntform{display:grid;gap:8px;margin-top:8px}
+.ntform textarea{width:100%}
+.chk{display:inline-flex;gap:4px;align-items:center;margin-right:10px}
