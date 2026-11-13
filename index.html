@@ -10,8 +10,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app/ui.css?v=202611131545">
-<link rel="stylesheet" href="app/bar.css?v=202611131545">
+<link rel="stylesheet" href="app/ui.css?v=202611131633">
+<link rel="stylesheet" href="app/bar.css?v=202611131633">
 </head>
 <body>
 <main class="wrap" id="main">
@@ -62,23 +62,30 @@
 
   <section class="card" aria-labelledby="svcH">
     <h2 id="svcH">外部サービスの鍵</h2>
-    <p class="small muted">映画・ドラマの情報（TMDB）を使うための鍵です。記録の保管場所（非公開）に置き、このアプリとClaudeの定期タスクだけが使います。会話には貼らないでください。</p>
+    <p class="small muted">映画・ドラマの情報（TMDB）を使うための鍵と、Discord へのお知らせの送り先です。記録の保管場所（非公開）に置き、このアプリと記録の保管場所の自動実行・Claudeの定期タスクだけが使います。会話には貼らないでください。</p>
     <div class="row">
       <label class="f grow">TMDB の鍵（API キー、または API 読み取りアクセストークン）<input type="password" id="tmdbIn" autocomplete="off" placeholder="未設定"></label>
     </div>
     <div class="row"><button type="button" class="pri" id="tmdbSave">保存して確かめる</button><span class="small muted" id="tmdbMsg"></span></div>
+    <h3 style="font-size:15px;margin:18px 0 4px">Discord へのお知らせ</h3>
+    <p class="small muted">新刊・新しいシーズン・確認待ちが増えた日だけ、朝8時ごろに1通にまとめて送ります。Discord のチャンネルの「ウェブフック」の URL を入れてください（チャンネルの設定 → 連携サービス → ウェブフック → 新しいウェブフック → ウェブフックURLをコピー）。</p>
+    <div class="row">
+      <label class="f grow">ウェブフックの URL<input type="password" id="dcIn" autocomplete="off" placeholder="未設定"></label>
+    </div>
+    <div class="row"><button type="button" class="pri" id="dcSave">保存する</button><button type="button" class="quiet" id="dcDel" hidden>送るのをやめる</button><span class="small muted" id="dcMsg"></span></div>
+    <p class="small muted" id="dcLast"></p>
   </section>
 </main>
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
-<script src="app/store.js?v=202611131545"></script>
-<script src="app/biblio.js?v=202611131545"></script>
-<script src="app/scan.js?v=202611131545"></script>
-<script src="app/ui.js?v=202611131545"></script>
-<script src="app/lib.js?v=202611131545"></script>
-<script src="app/discs.js?v=202611131545"></script>
-<script src="app/tickets.js?v=202611131545"></script>
-<script src="app/booklog.js?v=202611131545"></script>
+<script src="app/store.js?v=202611131633"></script>
+<script src="app/biblio.js?v=202611131633"></script>
+<script src="app/scan.js?v=202611131633"></script>
+<script src="app/ui.js?v=202611131633"></script>
+<script src="app/lib.js?v=202611131633"></script>
+<script src="app/discs.js?v=202611131633"></script>
+<script src="app/tickets.js?v=202611131633"></script>
+<script src="app/booklog.js?v=202611131633"></script>
 <script>
 "use strict";
 const { $, esc } = UI;
@@ -98,6 +105,25 @@ function tmdbShow() {
   const k = Shelf.read(KEYS)?.tmdb;
   $("tmdbIn").placeholder = k ? "設定済み（入れ直すときだけ入力）" : "未設定";
 }
+// Discord のウェブフック：records/keys.json の discord。保存すると、記録の保管場所の自動実行がすぐに試しの1通を送る
+function dcShow() {
+  const k = Shelf.read(KEYS)?.discord, n = Shelf.read("records/notify.json");
+  $("dcIn").placeholder = k ? "設定済み（入れ直すときだけ入力）" : "未設定"; $("dcDel").hidden = !k;
+  $("dcLast").textContent = k && n?.last?.msg ? `最後に送ったお知らせ：${n.last.at.slice(0, 16).replace("T", " ")}` : k && n?.hook ? "送り先の設定は届いています。知らせることがあった日に送ります" : "";
+}
+$("dcSave").onclick = async () => {
+  const k = $("dcIn").value.trim();
+  if (!/^https:\/\/(?:\w+\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/.test(k)) { $("dcMsg").textContent = "Discord のウェブフックの URL（https://discord.com/api/webhooks/… の形）を入れてください"; return; }
+  // 使える URL かを確かめる（確かめられない環境でも保存は続ける）
+  try { const r = await fetch(k); if (r.status === 401 || r.status === 404) { $("dcMsg").textContent = "このウェブフックは見つかりませんでした。消されていないか確かめてください"; return; } } catch (_) {}
+  Shelf.writeDoc(KEYS, { ...(Shelf.read(KEYS) || {}), discord: k, updated: new Date().toISOString() });
+  $("dcIn").value = ""; $("dcMsg").textContent = "保存しました。数分のうちに Discord に試しの1通が届きます"; dcShow();
+};
+$("dcDel").onclick = () => {
+  if (!confirm("Discord へのお知らせを止めますか？（ウェブフックの URL を消します）")) return;
+  const d = { ...(Shelf.read(KEYS) || {}) }; delete d.discord; d.updated = new Date().toISOString();
+  Shelf.writeDoc(KEYS, d); $("dcMsg").textContent = "止めました"; dcShow();
+};
 $("tmdbSave").onclick = async () => {
   const k = $("tmdbIn").value.trim(); if (!k) { $("tmdbMsg").textContent = "鍵を入れてください"; return; }
   $("tmdbMsg").textContent = "TMDB に確かめています…";
@@ -109,12 +135,12 @@ $("tmdbSave").onclick = async () => {
 
 (async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); $("notices").innerHTML = `<p class="small muted">鍵を設定すると表示されます。</p>`; return; }
-  await Shelf.init({ need: ["records/keys.json", "records/library/", "records/queue.json", "records/reading.json", "records/settings.json", "records/novels-checker/books.json", "records/novels-checker/log", "works/novels.json", "works/films.json", "works/adaptations.json", "records/discs.json", ...Tickets.paths, "records/sns/links.json"] });
+  await Shelf.init({ need: ["records/keys.json", "records/library/", "records/queue.json", "records/reading.json", "records/settings.json", "records/novels-checker/books.json", "records/novels-checker/log", "works/novels.json", "works/films.json", "works/adaptations.json", "records/discs.json", ...Tickets.paths, "records/sns/links.json", "records/notify.json"] });
   const ready = () => { const n = Shelf.read(Lib.P.novels), f = Shelf.read(Lib.P.films); if (n) Biblio.setNovels(n); if (f) Biblio.setFilms(f); };
   ready(); Shelf.on(Lib.P.novels, ready); Shelf.on(Lib.P.films, ready);
   Lib.reconcile();
   blAutoSync();
-  renderNotices(); tmdbShow(); Shelf.on(KEYS, tmdbShow);
+  renderNotices(); tmdbShow(); dcShow(); Shelf.on(KEYS, () => { tmdbShow(); dcShow(); }); Shelf.on("records/notify.json", dcShow);
   Shelf.onAny(p => { if (/records\/(queue|library|novels-checker)/.test(p)) renderNotices(); if (/records\/(tickets|films-checker)/.test(p)) renderTickets(); });
   renderTickets(); Tickets.bind($("tkBox"), renderTickets);
   Shelf.onStatus(() => renderNotices());

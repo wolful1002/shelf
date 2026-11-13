@@ -128,3 +128,9 @@
 - `records/tickets.json`：shelf-data の `tools/tickets.py`（GitHub Actions「映画館の予約」）が作る。`{at, items:{番号:{src, venue, t, raw, fmt, start, end, screen, seat, no, mails, cancel?, fk?, tm?, y?}}, unread?}`。対応しているのはローソン・ユナイテッドシネマ グループとイオンシネマ（e席リザーブ）。
 - `records/tickets-ans.json`：本人が決めたこと `{items:{番号:{v:"seen"|"no", at}}}`。「観た」を選ぶと、リストの映画は watched.json の seen・rw・wh、リスト外の映画は offlist.json に、日付と館の名前で記録する（app/tickets.js）。
 - ホームの「映画館の予約」、映画チェッカーの一覧の「予約」の印と詳細、作品のページに出す。
+
+## Discord へのお知らせ（2026-11-14）
+
+- 送り先：`records/keys.json` の `discord`（Discord のウェブフックの URL）。ホームの「外部サービスの鍵」で入れる・消す。
+- shelf-data の `tools/notify.py`（GitHub Actions「Discordへのお知らせ」、毎朝8時13分・送り先を入れたとき）が、新刊（所有シリーズの既刊数が持っている最後の巻より大きい）・新しいシーズン（shows.json の newS）・確認待ち（蔵書の確認待ち、SNSの感想の候補と迷うもの、映画館の予約で観たか確かめる回）のうち、前回から増えたものがあった日だけ1通にまとめて送る。
+- `records/notify.json`：`{hook（送り先の印）, sent:{知らせた鍵:日付}, last:{at, msg}}`。同じことを二度送らない。送り先を入れたときは試しの1通だけ送り、今あるものは覚えるだけにする。
