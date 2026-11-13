@@ -118,6 +118,7 @@ function detHtml(it) {
         <span class="row" style="gap:6px;margin-left:auto"><button type="button" class="small quiet" data-all="${s.n}">すべて観た</button><button type="button" class="small quiet" data-none="${s.n}">外す</button></span></h3>
         <div class="eps">${Array.from({ length: s.eps }, (_, i) => i + 1).map(e => `<button type="button" data-e="${e}" class="${w.includes(e) ? "on" : ""}${e > a ? " fut" : ""}" aria-pressed="${w.includes(e)}" title="第${e}話${e > a ? "（放送前）" : ""}">${e}</button>`).join("")}</div></div>`;
     }).join("")}
+    ${window.Mine ? Mine.html(["show:" + it.id]) : ""}
     <dl class="small" style="display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0">
       <dt class="muted">見放題</dt><dd style="margin:0">${S(p.sub)}</dd>${p.ads ? `<dt class="muted">広告つき無料</dt><dd style="margin:0">${esc(p.ads.join("、"))}</dd>` : ""}${p.ch ? `<dt class="muted">追加チャンネル</dt><dd style="margin:0">${esc(p.ch.join("、"))}</dd>` : ""}
       <dt class="muted">レンタル・購入</dt><dd style="margin:0">${esc([...new Set([...(p.rent || []), ...(p.buy || [])])].join("、") || "なし")}</dd>
@@ -216,7 +217,7 @@ $("list").addEventListener("click", async e => {
 
 (async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); return; }
-  await Shelf.init({ need: ["records/shows.json", "records/keys.json", "records/services.json"] });
+  await Shelf.init({ need: ["records/shows.json", "records/keys.json", "records/services.json", "records/sns/links.json"] });
   render(); renderTime();
   Shelf.on(P, () => { render(); renderTime(); });
 })();

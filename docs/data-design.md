@@ -111,7 +111,7 @@
 ## SNSの感想（2026-11-13）
 
 - `inbox/sns/posts-YYYY.json`：スプレッドシートの ShelfExport.gs が毎朝送る自分の投稿（作品名のあるものだけ）。`{posts:[{id, src, d, text, work:[作品名], url}]}`。`inbox/sns/aliases.json` は作品名の言い換えと自作原稿の印。
-- `records/sns/links.json`：shelf-data の `tools/sns_match.py`（GitHub Actions「SNSの感想の照合」）が書く。`{at, links:{"種類:番号":[投稿の番号]}}`。種類は novel・film・lib・show・off。
+- `records/sns/links.json`：shelf-data の `tools/sns_match.py`（GitHub Actions「SNSの感想の照合」）が書く。`{at, links:{"種類:番号":[投稿の番号]}, posts:{番号:{d, text, url}}}`。種類は novel・film・lib・show・off（必読書と結び付いた本は novel にまとめる）。必読書・映画・蔵書・ドラマとアニメの詳細の「自分の感想」（app/mine.js）が使う。
 - `records/sns/review.json`：本人が確かめるもの。`{at, cands:[{target, t, kind, posts, d, vol?, ep?}], ask:[{post, w, cands, verb}], nowhere:[{w, posts}], posts:{番号:{d, text, url}}}`。kind は done・again・now・want・doing・buy（画面に出すのは前の4つ）。
 - `records/sns/decided.json`：アプリの「SNSの感想」で本人が決めたこと。`{items:{"c|種類:番号|kind":{v:"ok"|"no", at}, "a|投稿|作品名":{to:"種類:番号"|"", at}}}`。照合はこれを守る。
 - 記録に付けると：必読書は books.json の read（読み返しは rr）、映画は watched.json の seen・rw・want（ts の印付き）、蔵書は reading.json か巻の read、ドラマ・アニメは shows.json の st・w を書く。夜中の投稿を考え、記録の日と1日違いは同じ回とみなす。

@@ -695,6 +695,7 @@ function rowHTML(f){
           <a href="${url}" target="_blank" rel="noopener">Google</a>
         </div></div>
       ${sameBlock(f)}
+      ${window.Mine ? Mine.html(["film:" + f.k]) : ""}
     </div>`;
   return `<li class="row${on?" done":""}" data-k="${f.k}">
     <button class="chk" role="checkbox" aria-checked="${on}" aria-label="${esc(f.t)} を鑑賞済みにする">${CHECK}</button>

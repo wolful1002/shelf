@@ -165,7 +165,7 @@ function render() {
   const live = all.filter(x => x.p.st !== "rec");
   const asks = rv.ask.filter(a => !dec[aKey(a)]);
   $("bigN").textContent = live.length; $("bigSub").textContent = "確かめる候補";
-  $("nCand").textContent = live.length; $("nAsk").textContent = asks.length; $("nNone").textContent = rv.nowhere.length;
+  $("nCand").textContent = live.length; $("nAsk").textContent = groupAsks(asks).length; $("nNone").textContent = rv.nowhere.length;
   $("at").textContent = rv.at ? `照合 ${rv.at.slice(0, 16).replace("T", " ")}` : "まだ照合していません";
   for (const b of document.querySelectorAll("[data-tab]")) b.setAttribute("aria-pressed", b.dataset.tab === tab);
   $("p-cand").hidden = tab !== "cand"; $("p-ask").hidden = tab !== "ask"; $("p-none").hidden = tab !== "none";
@@ -196,12 +196,29 @@ function renderCand(all) {
   $("candNo").textContent = `選んだ ${sel.size}件は違う`;
   $("candOk").disabled = $("candNo").disabled = !sel.size;
 }
+// 同じ作品名・同じ候補の投稿はひとまとめにして、一度に選べるようにする
+function groupAsks(asks) {
+  const g = new Map();
+  for (const a of asks) {
+    const k = a.w + "\n" + a.cands.map(c => c.kind + ":" + c.key).join(",");
+    if (!g.has(k)) g.set(k, { w: a.w, cands: a.cands, items: [] });
+    g.get(k).items.push(a);
+  }
+  return [...g.values()].sort((a, b) => b.items.length - a.items.length);
+}
+function candName(c) {
+  const t = c.kind === "film" || c.kind === "novel" ? titleOf({ target: c.kind + ":" + c.key, t: c.t }) : c.t;
+  return `${KN[c.kind]}：${t}`;
+}
 function renderAsk(asks) {
-  $("askList").innerHTML = asks.length ? asks.map((a, i) => `<li data-i="${i}"><div><span class="t">「${esc(a.w)}」</span> <span class="small muted">どれの感想ですか</span></div>
-    ${postHTML(a.post)}
-    <div class="choice">${a.cands.map(c => `<button type="button" class="small" data-to="${esc(c.kind + ":" + c.key)}">${KN[c.kind]}：${esc(c.kind === "film" ? titleOf({ target: "film:" + c.key, t: c.t }) : c.kind === "novel" ? titleOf({ target: "novel:" + c.key, t: c.t }) : c.t)}</button>`).join("")}
+  const gs = groupAsks(asks);
+  $("askList").innerHTML = gs.length ? gs.map((g, i) => `<li data-i="${i}">
+    <div><span class="t">「${esc(g.w)}」</span><span class="small muted">投稿 ${g.items.length}件。どれの感想ですか</span></div>
+    ${g.items.slice(0, 2).map(a => postHTML(a.post)).join("")}
+    ${g.items.length > 2 ? `<details><summary class="small">ほかの投稿 ${g.items.length - 2}件</summary>${g.items.slice(2, 30).map(a => postHTML(a.post)).join("")}</details>` : ""}
+    <div class="choice">${g.cands.map(c => `<button type="button" class="small" data-to="${esc(c.kind + ":" + c.key)}">${esc(candName(c))}</button>`).join("")}
     <button type="button" class="small quiet" data-to="">どれでもない</button></div></li>`).join("") : `<li class="empty">迷うものはありません</li>`;
-  $("askList")._asks = asks;
+  $("askList")._groups = gs;
 }
 function renderNone() {
   const q = $("noneQ").value.trim().toLowerCase();
@@ -215,8 +232,8 @@ document.addEventListener("click", e => {
   const k = e.target.closest("[data-k]"); if (k) { ck = k.dataset.k; sel.clear(); render(); return; }
   const to = e.target.closest("[data-to]");
   if (to) {
-    const li = to.closest("li[data-i]"), a = $("askList")._asks[+li.dataset.i];
-    decide([[aKey(a), { to: to.dataset.to }]]);
+    const li = to.closest("li[data-i]"), g = $("askList")._groups[+li.dataset.i];
+    decide(g.items.map(a => [aKey(a), { to: to.dataset.to }]));
     UI.toast(to.dataset.to ? "結び付けました。次の照合から使います" : "どれでもないにしました");
     render(); return;
   }

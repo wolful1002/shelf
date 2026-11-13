@@ -463,6 +463,7 @@ function openDetail(id) {
     </div>
     ${it.kind === "series" ? seriesHtml(it) : fmHtml(it)}
     ${it.sr ? seriesSiblingsHtml(it) : ""}
+    ${window.Mine ? Mine.html(it.nk ? ["novel:" + it.nk, "lib:" + it.id] : ["lib:" + it.id]) : ""}
     <details class="dbib"><summary>書誌（自動で取得したもの。違っているときだけ直す）</summary>
     <div class="grid2">
       ${f("t", "書名")}${f("a", "著者")}
