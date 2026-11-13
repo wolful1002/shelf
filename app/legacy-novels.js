@@ -451,7 +451,7 @@ function detailHTML(b){
     ${lists}
     ${sameHTML}
     ${window.Mine ? Mine.html(["novel:" + b.k]) : ""}
-    <div class="links"><a href="${amzURL(b)}" target="_blank" rel="noopener">Amazonで探す</a><a href="https://calil.jp/search?q=${qj}" target="_blank" rel="noopener">カーリルで図書館を探す</a><a href="https://www.google.com/search?q=${qj}" target="_blank" rel="noopener">Googleで調べる</a></div>
+    <div class="links"><a href="work.html?n=${b.k}">作品のページ</a><a href="${amzURL(b)}" target="_blank" rel="noopener">Amazonで探す</a><a href="https://calil.jp/search?q=${qj}" target="_blank" rel="noopener">カーリルで図書館を探す</a><a href="https://www.google.com/search?q=${qj}" target="_blank" rel="noopener">Googleで調べる</a></div>
   </div>`;
 }
 function onListClick(e){

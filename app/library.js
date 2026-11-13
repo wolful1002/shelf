@@ -7,6 +7,9 @@ const CATS = Biblio.CATS;
 // ---------- 画面の切り替え ----------
 const TABS = ["register", "list", "queue", "missing", "stats", "places", "booklog", "photos", "off"];
 function showTab() {
+  // #id=番号 は、一覧を開いてその本の詳細を出す（作品のページなどから）
+  const m = location.hash.match(/^#id=(.+)$/);
+  if (m) { const id = decodeURIComponent(m[1]); history.replaceState(null, "", "#list"); showTab(); if (Lib.get(id)) openDetail(id); return; }
   const t = TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "register";
   for (const x of TABS) { $("p-" + x).hidden = x !== t; document.querySelector(`[data-tab="${x}"]`).setAttribute("aria-current", x === t ? "true" : "false"); }
   render(t);
@@ -464,6 +467,7 @@ function openDetail(id) {
     ${it.kind === "series" ? seriesHtml(it) : fmHtml(it)}
     ${it.sr ? seriesSiblingsHtml(it) : ""}
     ${window.Mine ? Mine.html(it.nk ? ["novel:" + it.nk, "lib:" + it.id] : ["lib:" + it.id]) : ""}
+    <p class="small"><a href="work.html?${it.nk ? "n=" + it.nk : "b=" + encodeURIComponent(it.id)}">作品のページ</a>（読了・感想・映画化などをまとめて見る）</p>
     <details class="dbib"><summary>書誌（自動で取得したもの。違っているときだけ直す）</summary>
     <div class="grid2">
       ${f("t", "書名")}${f("a", "著者")}

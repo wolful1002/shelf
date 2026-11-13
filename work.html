@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>作品 — shelf</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="app/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="app/ui.css?v=202611131227">
+<link rel="stylesheet" href="app/bar.css?v=202611131227">
+<style>
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;margin:0;font-size:14px}
+.kv dt{color:var(--muted);font-size:13px;padding-top:1px}
+.kv dd{margin:0;overflow-wrap:anywhere}
+.cardh{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.cardh h2{margin:0;font-size:17px}
+.cardh a{font-size:13px;margin-left:auto}
+.done{color:var(--ok)}
+.items>li{display:block}
+.hits{list-style:none;margin:6px 0 0;padding:0}
+.hits a{display:flex;gap:8px;align-items:baseline;padding:7px 2px;border-bottom:1px solid var(--line);color:inherit;text-decoration:none}
+.hits a:hover .t{text-decoration:underline}
+.hits .t{font-weight:700}
+.tagk{font-size:11.5px;border:1px solid var(--line);border-radius:3px;padding:0 5px;color:var(--muted);white-space:nowrap}
+#search{margin-bottom:14px}
+#work>section+section{margin-top:12px}
+#work .myp .mh{font-size:17px;margin-bottom:10px}
+#work .myp .mh span{font-size:13px}
+</style>
+</head>
+<body>
+<main class="wrap" id="main">
+  <section class="card noprint" id="search">
+    <label class="row"><input type="search" id="q" class="grow" placeholder="作品名・著者・監督で探す" aria-label="作品を探す"></label>
+    <ul class="hits" id="hits"></ul>
+  </section>
+  <div id="work"><p class="muted">読み込み中…</p></div>
+</main>
+<script src="app/store.js?v=202611131227"></script>
+<script src="app/ui.js?v=202611131227"></script>
+<script src="app/biblio.js?v=202611131227"></script>
+<script src="app/lib.js?v=202611131227"></script>
+<script src="app/adapt.js?v=202611131227"></script>
+<script src="app/discs.js?v=202611131227"></script>
+<script src="app/mine.js?v=202611131227"></script>
+<script src="app/work.js?v=202611131227"></script>
+</body>
+</html>

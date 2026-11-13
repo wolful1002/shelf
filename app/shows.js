@@ -125,7 +125,7 @@ function detHtml(it) {
       <dt class="muted">原題</dt><dd style="margin:0">${esc(it.ot || "")}</dd>
       <dt class="muted">情報</dt><dd style="margin:0">TMDB（${esc(it.info || "")}時点）　<a href="https://www.themoviedb.org/tv/${it.tm}/watch?locale=JP" target="_blank" rel="noopener">配信ページ</a>　<a href="https://www.justwatch.com/jp/%E6%A4%9C%E7%B4%A2?q=${encodeURIComponent(it.t)}" target="_blank" rel="noopener">JustWatch</a></dd>
     </dl>
-    <div class="row"><button type="button" class="small" data-refresh>TMDBの情報を取り直す</button><span class="grow"></span><button type="button" class="small danger" data-del>この作品の記録を消す</button></div>
+    <div class="row"><a class="btn small quiet" href="work.html?s=${encodeURIComponent(it.id)}">作品のページ</a><button type="button" class="small" data-refresh>TMDBの情報を取り直す</button><span class="grow"></span><button type="button" class="small danger" data-del>この作品の記録を消す</button></div>
   </div>`;
 }
 function render() {
@@ -154,12 +154,15 @@ function renderTime() {
       <span>${ST_NM[it.st]}</span></div></div><button type="button" class="small quiet" data-go="${esc(it.id)}">開く</button></li>`).join("") || `<li class="empty">この時間で観られる作品はありません</li>`;
 }
 $("tMin").onchange = renderTime;
-$("tList").addEventListener("click", e => {
-  const b = e.target.closest("[data-go]"); if (!b) return;
-  const it = items()[b.dataset.go]; openId = it.id; FILT.st = it.st;
+function goShow(id) {
+  const it = items()[id]; if (!it) return; openId = it.id; FILT.st = it.st;
   document.querySelectorAll("[data-f]").forEach(x => x.setAttribute("aria-pressed", x.dataset.f === it.st)); render();
   document.querySelector(`#list li[data-id="${it.id}"]`)?.scrollIntoView({ block: "start" });
-});
+}
+$("tList").addEventListener("click", e => { const b = e.target.closest("[data-go]"); if (b) goShow(b.dataset.go); });
+// #id=番号 で、その作品を開く（作品のページなどから）
+const fromHash = () => { const m = location.hash.match(/^#id=(.+)$/); if (m) goShow(decodeURIComponent(m[1])); };
+addEventListener("hashchange", fromHash);
 
 // ---------- 操作 ----------
 document.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { FILT.st = b.dataset.f; document.querySelectorAll("[data-f]").forEach(x => x.setAttribute("aria-pressed", x === b)); render(); });
@@ -218,6 +221,6 @@ $("list").addEventListener("click", async e => {
 (async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); return; }
   await Shelf.init({ need: ["records/shows.json", "records/keys.json", "records/services.json", "records/sns/links.json"] });
-  render(); renderTime();
+  render(); renderTime(); fromHash();
   Shelf.on(P, () => { render(); renderTime(); });
 })();

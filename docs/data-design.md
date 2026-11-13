@@ -115,3 +115,9 @@
 - `records/sns/review.json`：本人が確かめるもの。`{at, cands:[{target, t, kind, posts, d, vol?, ep?}], ask:[{post, w, cands, verb}], nowhere:[{w, posts}], posts:{番号:{d, text, url}}}`。kind は done・again・now・want・doing・buy（画面に出すのは前の4つ）。
 - `records/sns/decided.json`：アプリの「SNSの感想」で本人が決めたこと。`{items:{"c|種類:番号|kind":{v:"ok"|"no", at}, "a|投稿|作品名":{to:"種類:番号"|"", at}}}`。照合はこれを守る。
 - 記録に付けると：必読書は books.json の read（読み返しは rr）、映画は watched.json の seen・rw・want（ts の印付き）、蔵書は reading.json か巻の read、ドラマ・アニメは shows.json の st・w を書く。夜中の投稿を考え、記録の日と1日違いは同じ回とみなす。
+
+## 作品のページ（2026-11-13・work.html）
+
+- `work.html?n=必読書の番号`・`?f=映画の番号`・`?b=蔵書の番号`（必読書と結び付いた本は ?n に移る）・`?s=ドラマ・アニメの番号`・`?o=リスト外の映画の題名`。
+- 読了・鑑賞の記録、蔵書の版と場所、原作・映画化、手持ちのソフト、配信、SNSの感想、作品の情報、掲載リストを1ページに出す。書き換えはしない（各画面へのリンクから直す）。
+- 各画面の詳細から「作品のページ」で開く。蔵書は `library.html#id=番号`、ドラマ・アニメは `shows.html#id=番号` でその作品の詳細を開ける。

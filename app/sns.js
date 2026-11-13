@@ -100,6 +100,11 @@ const titleOf = c => {
   return c.t;
 };
 
+const workURL = c => {
+  const i = c.target.indexOf(":"), kind = c.target.slice(0, i), key = c.target.slice(i + 1);
+  return "work.html?" + ({ novel: "n", film: "f", lib: "b", show: "s" }[kind] ? `${{ novel: "n", film: "f", lib: "b", show: "s" }[kind]}=${encodeURIComponent(key)}` : `o=${encodeURIComponent(c.t)}`);
+};
+
 // ---------- 記録に付ける ----------
 function apply(list) {
   const w = JSON.parse(JSON.stringify(wdoc())); let wTouched = false;
@@ -187,7 +192,7 @@ function renderCand(all) {
   $("candList").innerHTML = show.length ? show.map(({ c, p }) => {
     const id = cKey(c), more = c.posts.length - 2;
     return `<li class="cand" data-id="${esc(id)}"><input type="checkbox" id="ck-${esc(id)}" ${sel.has(id) ? "checked" : ""}>
-      <div><div><label for="ck-${esc(id)}"><span class="t">${esc(titleOf(c))}</span> <span class="pill">${KN[c.target.split(":")[0]]}</span> <span class="small muted">投稿 ${c.posts.length}件</span></label></div>
+      <div><div><label for="ck-${esc(id)}"><span class="t">${esc(titleOf(c))}</span> <span class="pill">${KN[c.target.split(":")[0]]}</span> <span class="small muted">投稿 ${c.posts.length}件</span></label>　<a class="small" href="${workURL(c)}">作品のページ</a></div>
       <div class="small ${p.st === "info" ? "muted" : ""}">${p.st === "info" ? "" : "→ "}${esc(p.txt || "")}</div>
       ${c.posts.slice(0, 2).map(postHTML).join("")}
       ${more > 0 ? `<details><summary class="small">ほかの投稿 ${more}件</summary>${c.posts.slice(2, 30).map(postHTML).join("")}</details>` : ""}</div></li>`;

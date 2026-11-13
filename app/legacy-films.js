@@ -689,6 +689,7 @@ function rowHTML(f){
         ${discBlock(f)}
         <h4 style="margin-top:14px">調べる</h4>
         <div class="links">
+          <a href="work.html?f=${f.k}">作品のページ</a>
           <a href="https://www.justwatch.com/jp/%E6%A4%9C%E7%B4%A2?q=${qt}" target="_blank" rel="noopener">JustWatch（配信）</a>
           <a href="https://filmarks.com/search/movies?q=${qt}" target="_blank" rel="noopener">Filmarks</a>
           <a href="https://www.amazon.co.jp/s?k=${qt}+${encodeURIComponent("DVD Blu-ray")}" target="_blank" rel="noopener">Amazon（DVD/BD）</a>
