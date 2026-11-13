@@ -119,3 +119,7 @@ details>summary{cursor:pointer;font-weight:700}
 .fmpart{display:inline-flex;align-items:center;gap:4px;min-height:40px;padding:2px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px}
 .fmpart.on{border-color:var(--ok);background:var(--ok-soft)}
 .fmadd{margin-top:8px}
+/* 映画館の予約（app/tickets.js） */
+.tkhd{font-size:14px;margin:12px 0 4px}
+.tk .tkh{border-left:3px solid var(--line);padding-left:8px;margin:3px 0}
+.tk .row{margin-top:6px}

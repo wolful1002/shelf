@@ -74,6 +74,11 @@ function head(eyebrow, title, sub, tags) {
   document.title = `${title} — shelf`;
   return `<header class="phead"><div><div class="eyebrow">${esc(eyebrow)}</div><h1>${esc(title)}</h1><p class="lede">${sub}</p>${tags ? `<div class="row">${tags}</div>` : ""}</div></header>`;
 }
+function ticketsHTML(ts) {
+  if (!ts.length) return "";
+  const ST = { soon: "予約あり", ask: "観たか未確認（ホームで選べます）", seen: "観た", no: "観なかった" };
+  return `<ul class="list items">${ts.map(t => `<li>${esc(Tickets.when(t))} <span class="pill">${ST[Tickets.state(t)] || ""}</span><div class="small muted">${esc(Tickets.detail(t))}</div></li>`).join("")}</ul>`;
+}
 const mineCard = targets => { const h = Mine.html(targets, 5); return h ? `<section class="card">${h}</section>` : ""; };
 
 // ---------- 作品の種類ごと ----------
@@ -107,6 +112,7 @@ function filmPage(k) {
   return head("映画", f.t, esc([f.d, f.y].filter(Boolean).join("・")),
       `<span class="pill ${s ? "ok" : ""}">${s ? "鑑賞済" : "未見"}</span>${owned.length ? `<span class="pill">所有 ${esc([...new Set(owned.map(d => d.fmt))].join("・"))}</span>` : ""}${Adapt.novelsOf(k).length ? `<span class="pill">原作あり</span>` : ""}`)
     + card("鑑賞の記録", rec, `<a href="films.html#k=${k}">映画チェッカーで開く</a>`)
+    + card("映画館の予約", ticketsHTML(Tickets.forFilm(k)))
     + card("原作", adaptFilmHTML(k))
     + card("手持ちのソフト", discHTML(k))
     + card("配信", vodHTML(f.p, f.v))
@@ -132,10 +138,20 @@ function showPage(id) {
     + mineCard(["show:" + id]);
 }
 function offPage(t) {
-  const xs = (Shelf.read(OFF)?.items || []).filter(o => norm(o.t) === norm(t)); if (!xs.length) return notFound();
+  const xs = (Shelf.read(OFF)?.items || []).filter(o => norm(o.t) === norm(t));
+  if (!xs.length) {   // まだ鑑賞の記録が無い、予約だけの映画
+    const ts = Tickets.forTitle(t); if (!ts.length) return notFound();
+    return head("映画（リスト外）", ts[0].t, ts[0].y ? ts[0].y + "年" : "", `<span class="pill">未見</span>`)
+      + card("映画館の予約", ticketsHTML(ts))
+      + (ts[0].tm ? card("作品の情報", kv([["TMDB", `<a href="https://www.themoviedb.org/movie/${ts[0].tm}?language=ja-JP" target="_blank" rel="noopener">作品のページ</a>`]])) : "")
+      + mineCard(["off:" + norm(t)]);
+  }
   const ds = xs.map(o => o.d).filter(isDate).sort();
+  const tm = xs.find(o => o.tm)?.tm;
   return head("映画（リスト外）", xs[0].t, xs[0].y ? xs[0].y + "年" : "", `<span class="pill ok">鑑賞済</span>`)
     + card("鑑賞の記録", kv([["鑑賞", ds.map(d => esc(d) + (xs.find(o => o.d === d)?.w ? `（${esc(xs.find(o => o.d === d).w)}）` : "")).join("<br>") || "日付なし"], ["回数", ds.length > 1 ? ds.length + "回" : ""]]), `<a href="films.html">映画チェッカーで開く</a>`)
+    + card("映画館の予約", ticketsHTML(Tickets.forTitle(xs[0].t)))
+    + (tm ? card("作品の情報", kv([["TMDB", `<a href="https://www.themoviedb.org/movie/${tm}?language=ja-JP" target="_blank" rel="noopener">作品のページ</a>`]])) : "")
     + mineCard(["off:" + norm(t)]);
 }
 const notFound = () => `<section class="card"><p>この作品は記録に見つかりませんでした。上で探してください。</p></section>`;
@@ -175,7 +191,7 @@ $("q").addEventListener("input", search);
 
 (async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); return; }
-  await Shelf.init({ need: ["works/novels.json", "works/films.json", "works/adaptations.json", "records/library/", "records/reading.json", "records/novels-checker/books.json", "records/films-checker/watched.json", "records/films-checker/offlist.json", "records/shows.json", "records/discs.json", "records/services.json", "records/sns/links.json", "records/settings.json"] });
+  await Shelf.init({ need: ["works/novels.json", "works/films.json", "works/adaptations.json", "records/library/", "records/reading.json", "records/novels-checker/books.json", "records/films-checker/watched.json", "records/films-checker/offlist.json", "records/shows.json", "records/discs.json", "records/services.json", "records/sns/links.json", "records/settings.json", ...Tickets.paths] });
   render();
   let t = null;
   Shelf.onAny(() => { clearTimeout(t); t = setTimeout(() => { IDX = null; render(); search(); }, 300); });

@@ -655,6 +655,13 @@ function adaptDD(f){
     return `<a href="novels.html#k=${p.n}">${esc(p.nt)}</a>（${esc(p.na)}${p.ny ? "・" + (p.ny < 0 ? "前" + (-p.ny) : p.ny) : ""}）<span class="mm" style="${r ? "color:var(--done)" : ""}">${r ? "✓ 読了" : "未読"}</span>`;
   }).join("<br>")}</dd>`;
 }
+// 映画館の予約（app/tickets.js）。これからの予約は一覧に印、詳細には予約した回をすべて出す
+function ticketDD(f){
+  const ts = window.Tickets ? Tickets.forFilm(f.k) : []; if(!ts.length) return "";
+  const ST = {soon:"予約あり", ask:"観たか未確認（ホームで選ぶ）", seen:"観た", no:"観なかった"};
+  return `<dt>映画館の予約</dt><dd>${ts.map(t=>`${esc(Tickets.when(t))}　${esc(Tickets.detail(t))} <span class="mm">${ST[Tickets.state(t)]||""}</span>`).join("<br>")}</dd>`;
+}
+const ticketTag = f => { const t = window.Tickets ? Tickets.forFilm(f.k).find(t=>Tickets.state(t)==="soon") : null; return t ? `<span class="own-tag" title="${esc(Tickets.when(t)+" "+t.venue)}">予約 ${+t.start.slice(5,7)}/${+t.start.slice(8,10)}</span>` : "" };
 function rowHTML(f){
   const on = !!seen[f.k];
   const strip = allKeys().map(k=>`<i class="${k==="b1001"?"base ":""}${k.startsWith("c_")?"cu ":""}${k in f.s?"on":""}" title="${esc(DATA.lists[k].name)}${k in f.s ? rankText(k,f.s[k]) : ""}"></i>`).join("");
@@ -663,7 +670,7 @@ function rowHTML(f){
   const inf = info[f.k] || {}, st = inf.st || [];
   const isOpen = openKey === f.k;
   const owned = window.Discs ? Discs.ownedFilm(f.k) : [];
-  const tags = vodTag(f) + (owned.length ? `<span class="own-tag" title="手持ちのソフト">所有 ${esc([...new Set(owned.map(d=>d.fmt))].join("・"))}</span>` : inf.disc==="y" ? `<span class="disc-tag">DVD/BD</span>` : "");
+  const tags = ticketTag(f) + vodTag(f) + (owned.length ? `<span class="own-tag" title="手持ちのソフト">所有 ${esc([...new Set(owned.map(d=>d.fmt))].join("・"))}</span>` : inf.disc==="y" ? `<span class="disc-tag">DVD/BD</span>` : "");
   const dir = f.d ? esc(f.d) : `<span class="unsure">監督 要確認</span>`;
   const qt = encodeURIComponent(f.t.replace(/（.*?）/g,""));
   const detail = !isOpen ? "" : `<div class="detail">
@@ -677,6 +684,7 @@ function rowHTML(f){
         <dt>上映時間</dt><dd>${f.rt ? `${f.rt}分${f.rt >= 60 ? `（${Math.floor(f.rt/60)}時間${f.rt%60 ? `${f.rt%60}分` : ""}）` : ""}<span class="mm">　${f.rts === "t" ? "TMDBの登録値" : "Claudeの知識による目安"}</span>` : `<span class="mm">未確認</span>`}</dd>
         <dt>原題・英題</dt><dd>${esc(f.en || "—")}</dd>
         ${adaptDD(f)}
+        ${ticketDD(f)}
         <dt>日本での入手性</dt><dd>${f.j ? JP[f.j]+"（目安）" : "未確認（追加リストの新規作品）"}</dd>
         <dt>スコア</dt><dd>${Math.round(f.sc)}（全映画対象のリスト ${f.gh}/${f.ge}、専門リスト ${f.sh}/${f.se}）</dd>
         <dt>掲載リスト</dt><dd>${allKeys().filter(k=>k in f.s).map(k=>esc(DATA.lists[k].name)+rankText(k,f.s[k])).join("<br>")}</dd>

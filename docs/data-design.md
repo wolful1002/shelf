@@ -121,3 +121,10 @@
 - `work.html?n=必読書の番号`・`?f=映画の番号`・`?b=蔵書の番号`（必読書と結び付いた本は ?n に移る）・`?s=ドラマ・アニメの番号`・`?o=リスト外の映画の題名`。
 - 読了・鑑賞の記録、蔵書の版と場所、原作・映画化、手持ちのソフト、配信、SNSの感想、作品の情報、掲載リストを1ページに出す。書き換えはしない（各画面へのリンクから直す）。
 - 各画面の詳細から「作品のページ」で開く。蔵書は `library.html#id=番号`、ドラマ・アニメは `shows.html#id=番号` でその作品の詳細を開ける。
+
+## 映画館の予約（2026-11-14）
+
+- `inbox/mail/<メールの番号>.json`：Claude の毎朝の定期タスク「映画館の予約メールの取り込み」が、予約用のメール箱（自動転送先）から写す予約確認メール `{id, date, from, subject, body}`。
+- `records/tickets.json`：shelf-data の `tools/tickets.py`（GitHub Actions「映画館の予約」）が作る。`{at, items:{番号:{src, venue, t, raw, fmt, start, end, screen, seat, no, mails, cancel?, fk?, tm?, y?}}, unread?}`。対応しているのはローソン・ユナイテッドシネマ グループとイオンシネマ（e席リザーブ）。
+- `records/tickets-ans.json`：本人が決めたこと `{items:{番号:{v:"seen"|"no", at}}}`。「観た」を選ぶと、リストの映画は watched.json の seen・rw・wh、リスト外の映画は offlist.json に、日付と館の名前で記録する（app/tickets.js）。
+- ホームの「映画館の予約」、映画チェッカーの一覧の「予約」の印と詳細、作品のページに出す。

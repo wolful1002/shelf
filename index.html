@@ -10,8 +10,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app/ui.css?v=202611131227">
-<link rel="stylesheet" href="app/bar.css?v=202611131227">
+<link rel="stylesheet" href="app/ui.css?v=202611131545">
+<link rel="stylesheet" href="app/bar.css?v=202611131545">
 </head>
 <body>
 <main class="wrap" id="main">
@@ -41,6 +41,12 @@
     <div id="notices"><p class="muted small">読み込み中…</p></div>
   </section>
 
+  <section class="card" id="tkCard" aria-labelledby="tkH" hidden>
+    <div class="row"><h2 id="tkH" class="grow">映画館の予約</h2></div>
+    <p class="small muted">予約確認のメールから自動で入ります。予約しただけでは観たことにしません。上映の時刻を過ぎたら、観たかどうかを選んでください。</p>
+    <div id="tkBox"></div>
+  </section>
+
   <section class="card" aria-labelledby="navH">
     <h2 id="navH">画面</h2>
     <div class="row">
@@ -65,13 +71,14 @@
 </main>
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
-<script src="app/store.js?v=202611131227"></script>
-<script src="app/biblio.js?v=202611131227"></script>
-<script src="app/scan.js?v=202611131227"></script>
-<script src="app/ui.js?v=202611131227"></script>
-<script src="app/lib.js?v=202611131227"></script>
-<script src="app/discs.js?v=202611131227"></script>
-<script src="app/booklog.js?v=202611131227"></script>
+<script src="app/store.js?v=202611131545"></script>
+<script src="app/biblio.js?v=202611131545"></script>
+<script src="app/scan.js?v=202611131545"></script>
+<script src="app/ui.js?v=202611131545"></script>
+<script src="app/lib.js?v=202611131545"></script>
+<script src="app/discs.js?v=202611131545"></script>
+<script src="app/tickets.js?v=202611131545"></script>
+<script src="app/booklog.js?v=202611131545"></script>
 <script>
 "use strict";
 const { $, esc } = UI;
@@ -102,18 +109,24 @@ $("tmdbSave").onclick = async () => {
 
 (async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); $("notices").innerHTML = `<p class="small muted">鍵を設定すると表示されます。</p>`; return; }
-  await Shelf.init({ need: ["records/keys.json", "records/library/", "records/queue.json", "records/reading.json", "records/settings.json", "records/novels-checker/books.json", "records/novels-checker/log", "works/novels.json", "works/films.json", "works/adaptations.json", "records/discs.json"] });
+  await Shelf.init({ need: ["records/keys.json", "records/library/", "records/queue.json", "records/reading.json", "records/settings.json", "records/novels-checker/books.json", "records/novels-checker/log", "works/novels.json", "works/films.json", "works/adaptations.json", "records/discs.json", ...Tickets.paths, "records/sns/links.json"] });
   const ready = () => { const n = Shelf.read(Lib.P.novels), f = Shelf.read(Lib.P.films); if (n) Biblio.setNovels(n); if (f) Biblio.setFilms(f); };
   ready(); Shelf.on(Lib.P.novels, ready); Shelf.on(Lib.P.films, ready);
   Lib.reconcile();
   blAutoSync();
   renderNotices(); tmdbShow(); Shelf.on(KEYS, tmdbShow);
-  Shelf.onAny(p => { if (/records\/(queue|library|novels-checker)/.test(p)) renderNotices(); });
+  Shelf.onAny(p => { if (/records\/(queue|library|novels-checker)/.test(p)) renderNotices(); if (/records\/(tickets|films-checker)/.test(p)) renderTickets(); });
+  renderTickets(); Tickets.bind($("tkBox"), renderTickets);
   Shelf.onStatus(() => renderNotices());
 })();
 
 const QNAME = { link: "チェッカーとの結び付け", cat: "本の種類", bib: "書誌が見つからない本", check: "書誌の確認", unowned: "所有を外した本", same: "同じ本かどうか", dupbuy: "2回以上買った本", read: "読了の候補", series: "シリーズかどうか", blread: "ブクログの読了記録", fmt: "持っている版" };
 const mediaName = m => m === "ebook" ? "電子" : m === "both" ? "紙と電子" : "紙";
+// 映画館の予約（観たか確かめる回と、これからの予約）
+function renderTickets() {
+  const h = Tickets.html();
+  $("tkCard").hidden = !h; $("tkBox").innerHTML = h;
+}
 function renderNotices() {
   const q = Object.values(Lib.queue());
   const by = {}; q.forEach(x => by[x.type] = (by[x.type] || 0) + 1);
