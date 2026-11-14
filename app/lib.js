@@ -799,11 +799,35 @@
     if (into.kind === "series" && from.kind !== "series") {
       const isb = [...L.isbnsOf(from)];
       for (const [ed, m] of L.volMaps(into)) for (const [n, v] of Object.entries(m)) if (v.isbn && isb.includes(v.isbn)) return L.mergeBookIntoVol(into, from, into.issues ? n : +n, ed || undefined);
+      // ISBN で決まらなければ、本の書名の巻数（「3月のライオン 18」の 18）
+      const se = L.splitEd(from.t), sv = Biblio.splitVolume(se.base, null);
+      if (sv.vol != null && !into.issues) return L.mergeBookIntoVol(into, from, sv.vol, se.ed && into.eds?.[se.ed] ? se.ed : undefined);
       return null;   // 巻が決まらない：まとめない
     }
     if (from.kind === "series" && into.kind !== "series") return L.mergeSame(from, into);
-    if (into.kind === "series" || from.kind === "series") return null;
+    if (into.kind === "series" && from.kind === "series") return L.mergeSeriesInto(into, from);
     return L.mergeInto(into, from);
+  };
+  // 2つのシリーズの記録を1つにまとめる（「3月のライオン」と「3月のライオン : March comes in like a lion.」など。修正指示書 C-7）。
+  // 巻ごとの所持・読了・ISBN を足し合わせ（into に入っている値は残す）、購入の記録・ブクログの結び付き・空いた項目を引き継ぐ
+  L.mergeSeriesInto = (into, from) => {
+    noDupCheck++;
+    try {
+      const x = clone(into);
+      const mergeVols = (dst, src) => { for (const [n, v] of Object.entries(src || {})) { const d = dst[n] = dst[n] || {}; for (const [k, val] of Object.entries(v)) if (d[k] == null || d[k] === "") d[k] = val; if (v.media && d.media && v.media !== d.media) d.media = "both"; } };
+      x.vols = x.vols || {}; mergeVols(x.vols, from.vols);
+      for (const [e, ev] of Object.entries(from.eds || {})) { x.eds = x.eds || {}; x.eds[e] = x.eds[e] || { vols: {} }; mergeVols(x.eds[e].vols, ev.vols); }
+      for (const k of ["a", "pub", "label", "cat", "loc", "cover", "y", "fmt"]) if ((x[k] == null || x[k] === "") && from[k]) x[k] = from[k];
+      if (from.total && !(x.total >= from.total) && (x.totalAuto || x.total == null)) { x.total = from.total; x.totalAuto = from.totalAuto; }
+      if (from.done && !x.done) { x.done = from.done; if (from.doneAuto) x.doneAuto = from.doneAuto; }
+      if (from.media && x.media && from.media !== x.media) x.media = "both";
+      for (const b of from.buy || []) { x.buy = x.buy || []; if (!x.buy.some(y => y.shop === b.shop && y.d === b.d && y.v === b.v)) x.buy.push(b); }
+      const blks = [...new Set([...(x.blks || []), from.blk, ...(from.blks || [])].filter(Boolean))].filter(b => b !== x.blk); if (blks.length) x.blks = blks;
+      const keys = [...new Set([...(x.blkKeys || []), from.blkKey, ...(from.blkKeys || [])].filter(Boolean))].filter(b => b !== x.blkKey); if (keys.length) x.blkKeys = keys;
+      if (from.st === "own") x.st = "own";
+      L.put(x); L.qDelFor(from.id); L.remove(from.id);
+      return x;
+    } finally { noDupCheck--; }
   };
   // ---------- 同じISBNの記録（2026-11-14 の点検で195組見つかった重複） ----------
   // 所有している記録どうしで、同じISBNを持つ組を集める。返り値：[{isbns:[…], ids:[…]}]（3件以上つながるものは1組）

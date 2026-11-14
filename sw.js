@@ -3,7 +3,7 @@
 // 2026-11-14（修正指示書 B-1）：電波が弱い場所（書店の奥など）で画面が開かないことがあったので、
 //   版の印（?v=…）の付いたプログラムは端末の写しを先に使う（版が変われば名前が変わるので、古いものは混ざらない）。
 //   画面（*.html）などは通信を2.5秒だけ待ち、だめなら端末の写しで開く（通信の返事が後から来たら、写しだけ新しくする）。
-const V = "shelf-202611140941";
+const V = "shelf-202611140943";
 const STAMP = V.replace("shelf-", "");
 const PAGES = ["./", "index.html", "library.html", "novels.html", "films.html", "shows.html", "sns.html", "work.html", "writing.html", "import.html", "manifest.webmanifest", "app/icon.svg"];
 const CODE = ["app/ui.css", "app/bar.css", "app/ui.js", "app/store.js", "app/biblio.js", "app/scan.js", "app/lib.js", "app/booklog.js", "app/fixes.js", "app/library.js", "app/photos.js",
