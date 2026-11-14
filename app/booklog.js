@@ -18,7 +18,7 @@ function markBooklogRead(it, vol, d) {
     if (vol != null) { it.vols = it.vols || {}; const v = it.vols[vol] || {}; if (!v.read) it.vols[vol] = { ...v, read: date || 1 }; }
   } else if (it.nk) {
     if (!Lib.ndoc().read[it.nk]) Lib.setNovelRead(it.nk, date || 1);
-  } else if (!Lib.reading()["b:" + it.id]) {
+  } else if (Lib.reading()["b:" + it.id]?.s !== "read") {
     Lib.setReading("b:" + it.id, { s: "read", d: date || undefined, via: "booklog", n: 1 });
   }
   it.blkRead = 1;

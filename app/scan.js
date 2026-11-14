@@ -10,6 +10,8 @@
       const f = { ok: 1320, dup: 880, warn: 520, ng: 300 }[kind] || 1000;
       o.frequency.value = f; g.gain.value = 0.08; o.connect(g); g.connect(audio.destination);
       o.start(); o.stop(audio.currentTime + (kind === "ng" ? 0.25 : 0.08));
+      // unk：持っているか確かめきれなかった（電波なしで書名の照合ができない）。低い音を2つ下がって鳴らす
+      if (kind === "unk") { o.frequency.value = 700; const o2 = audio.createOscillator(); o2.frequency.value = 420; o2.connect(g); o2.start(audio.currentTime + 0.14); o2.stop(audio.currentTime + 0.34); }
       if (kind === "dup") { const o2 = audio.createOscillator(); o2.frequency.value = 880; o2.connect(g); o2.start(audio.currentTime + 0.12); o2.stop(audio.currentTime + 0.2); }
     } catch {}
   };

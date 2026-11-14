@@ -17,14 +17,16 @@ const sel = new Set();
 
 const review = () => Shelf.read(R) || { cands: [], ask: [], nowhere: [], posts: {} };
 const decided = () => Shelf.read(D)?.items || {};
-const cKey = c => `c|${c.target}|${c.kind}`;
+// 候補の鍵。照合の道具（tools/sns_match.py）が付けた id（作品・種類・日付）を使う。
+// 決めたことは投稿ごとに覚える（"p|作品|種類|投稿の番号"）。「違う」はその投稿についてだけで、あとで別の投稿で同じ作品を「読んだ」と書けば、また候補に出る（修正指示書 B-2）
+const cKey = c => c.id || `c|${c.target}|${c.kind}`;
+const postKeys = c => c.posts.map(p => `p|${c.target}|${c.kind}|${p}`);
+const isDecided = (c, dec) => !!dec[`c|${c.target}|${c.kind}`] || postKeys(c).every(k => dec[k]);
 const aKey = a => `a|${a.post}|${a.w}`;
 function decide(entries) {   // entries：[[鍵, 値]]。まとめて一度に書く
-  const d = JSON.parse(JSON.stringify(Shelf.read(D) || { items: {} })); d.items = d.items || {};
+  // 決めたことは1件ずつ書く（2台で別々に決めても、片方が消えない）
   const at = UI.nowIso();
-  for (const [k, v] of entries) d.items[k] = { ...v, at };
-  d.updated = at;
-  Shelf.writeDoc(D, d);
+  Shelf.writeItems(D, Object.fromEntries(entries.map(([k, v]) => [k, { ...v, at }])));
 }
 
 // ---------- 記録の今の状態 ----------
@@ -107,7 +109,7 @@ const workURL = c => {
 
 // ---------- 記録に付ける ----------
 function apply(list) {
-  const w = JSON.parse(JSON.stringify(wdoc())); let wTouched = false;
+  const w0 = JSON.parse(JSON.stringify(wdoc())), w = JSON.parse(JSON.stringify(w0)); let wTouched = false;
   w.seen = w.seen || {}; w.want = w.want || {}; w.rw = w.rw || {}; w.ts = w.ts || {};
   let clk = 0; for (const m of Object.values(w.ts)) for (const x of Object.values(m || {})) clk = Math.max(clk, x);
   const stampW = (n, k) => { clk = Math.max(Date.now(), clk + 1); (w.ts[n] = w.ts[n] || {})[k] = clk; wTouched = true; };
@@ -153,7 +155,7 @@ function apply(list) {
     });
     Lib.batchCommit();
   } catch (e) { Lib.batchDiscard(); throw e; }
-  if (wTouched) { w.v = 2; w.updated = UI.nowIso(); Shelf.writeDoc(W, w); }
+  if (wTouched) { w.v = 2; w.updated = UI.nowIso(); Shelf.writeDoc(W, w, w0); }
 }
 
 // ---------- 画面 ----------
@@ -163,7 +165,7 @@ function postHTML(id) {
 }
 function cands() {
   const dec = decided();
-  return review().cands.filter(c => KIND[c.kind] && !dec[cKey(c)]).map(c => ({ c, p: plan(c) }));
+  return review().cands.filter(c => KIND[c.kind] && !isDecided(c, dec)).map(c => ({ c, p: plan(c) }));
 }
 function render() {
   const rv = review(), dec = decided(), all = cands();
@@ -253,7 +255,7 @@ $("selAll").onclick = () => { for (const li of document.querySelectorAll("#candL
 $("selNone").onclick = () => { sel.clear(); render(); };
 $("candNo").onclick = () => {
   if (!sel.size) return;
-  decide([...sel].map(id => [id, { v: "no" }])); UI.toast(`${sel.size}件を候補から外しました`); sel.clear(); render();
+  decide(cands().filter(x => sel.has(cKey(x.c))).flatMap(x => postKeys(x.c).map(k => [k, { v: "no" }]))); UI.toast(`${sel.size}件を候補から外しました`); sel.clear(); render();
 };
 $("candOk").onclick = () => {
   if (!sel.size) return;
@@ -262,7 +264,7 @@ $("candOk").onclick = () => {
   if (!confirm(`${ps.length}件を確かめ済みにし、そのうち ${n}件を記録に付けます。よろしいですか？`)) return;
   try { apply(ps.filter(p => p.st === "new" || p.st === "date")); }
   catch (err) { alert("記録に付けられませんでした：" + err.message); return; }
-  decide(ps.map(p => [cKey(p.c), { v: "ok" }]));
+  decide(ps.flatMap(p => postKeys(p.c).map(k => [k, { v: "ok" }])));
   UI.toast(`${n}件を記録に付けました`); sel.clear(); render();
 };
 $("noneQ").addEventListener("input", () => { noneN = 100; renderNone(); });

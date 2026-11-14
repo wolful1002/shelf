@@ -125,7 +125,31 @@
     const r = { ...base };
     if (b) { r.ndc = b.ndc || ""; if (!r.vol) r.vol = b.vol; if (!r.series) r.series = b.series; if (!r.y) r.y = b.y; }
     r.trial = /試し読み|無料版|お試し/.test(r.t);
+    B.remember(isbn, r);
     return r;
+  };
+
+  // ---------- 書誌の端末の控え ----------
+  // 一度引いた書誌（ISBN→書名・著者など）を端末に取っておき、電波が無いときも書名で所持を照合できるようにする
+  const BC = "shelf.bibCache", BCMAX = 4000;
+  let bcache = null;
+  const bcLoad = () => { if (!bcache) { try { bcache = JSON.parse(localStorage.getItem(BC) || "{}") || {}; } catch { bcache = {}; } } return bcache; };
+  B.bibCached = isbn => bcLoad()[isbn] || null;
+  B.remember = (isbn, b) => {
+    if (!isbn || !b?.t) return;
+    const m = bcLoad();
+    m[isbn] = { t: b.t, a: b.a || "", pub: b.pub || "", y: b.y || null, vol: b.vol || "", series: b.series || "", label: b.label || "", ccode: b.ccode || "", ndc: b.ndc || "", src: b.src || "", at: Date.now() };
+    const ks = Object.keys(m);
+    if (ks.length > BCMAX) ks.sort((x, y) => (m[x].at || 0) - (m[y].at || 0)).slice(0, ks.length - BCMAX).forEach(k => delete m[k]);
+    try { localStorage.setItem(BC, JSON.stringify(m)); } catch {}
+  };
+  // 控えがあればそれを使い、電波があれば引き直す。電波が無い・書誌サービスが応答しないときは控え（cached:true）か null
+  B.lookupCached = async isbn => {
+    const c = B.bibCached(isbn);
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return c ? { ...c, cached: true } : null;
+    const b = await B.lookup(isbn).catch(() => null);
+    if (b) return b;
+    return c ? { ...c, cached: true } : null;
   };
 
   // ---------- 文字の正規化 ----------

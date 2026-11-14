@@ -88,9 +88,14 @@
     // ほかのタブが送り終えたら、このタブの表示も「保存済み」にする
     if (!queue.length && status.state === "pending") setStatus({ state: "ok", msg: "保存しました" }); else setStatus({});
   }
-  function enqueue(op) {
-    op.k = newKey(); queue.push(op); unsaved.add(op.k);
-    qUpdate(q => q.some(o => o.k === op.k) ? q : q.concat([op])).then(() => { unsaved.delete(op.k); flush(); });
+  function enqueue(op) { enqueueMany([op]); }
+  // いくつもの操作を一度に積む（まとめて登録するときに、送信待ちの書き直しを1回で済ませる）
+  function enqueueMany(ops) {
+    if (!ops.length) return;
+    for (const op of ops) { op.k = newKey(); queue.push(op); unsaved.add(op.k); }
+    const ks = new Set(ops.map(o => o.k));
+    qUpdate(q => { const have = new Set(q.map(o => o.k)); return q.concat(ops.filter(o => !have.has(o.k))); })
+      .then(() => { for (const k of ks) unsaved.delete(k); flush(); });
   }
   if (bc) bc.onmessage = e => {
     const m = e.data || {};
@@ -129,13 +134,61 @@
     if (!res.ok) throw new Error("ファイルを取れませんでした（" + res.status + "）");
     return JSON.parse(await res.text());
   }
+  // ---------- 一部だけ書く（patch） ----------
+  // 変更は「どこを（keys）どうしたか」の小さな操作で積む。ぶつかったら最新の中身を読み、同じ操作を当て直す。
+  // 操作：{t:"patch", path, keys:[...], value} 書く・{del:1} 消す・{add:[...], rm:[...]} 並びに足す・外す・{mode:"max"} 大きい方を残す
+  const isObj = v => !!v && typeof v === "object" && !Array.isArray(v);
+  const J = v => JSON.stringify(v);
+  const modes = {};   // 名前つきの当て方（例：保管場所のラベルの番号がぶつかったら次の番号にする）
+  // a から b への差を、一部だけ書く操作の並びにする。中の入れ物（{}）は奥まで比べ、物の並び（[{...}]）は足し引きにする
+  function diff(a, b, keys = [], out = []) {
+    a = isObj(a) ? a : {}; b = isObj(b) ? b : {};
+    for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+      const x = a[k], y = b[k], ks = [...keys, k];
+      if (y === undefined) { if (x !== undefined) out.push({ keys: ks, del: 1 }); continue; }
+      if (J(x) === J(y)) continue;
+      if (isObj(x) && isObj(y)) diff(x, y, ks, out);
+      else if (Array.isArray(x) && Array.isArray(y) && [...x, ...y].some(isObj)) {
+        const xs = new Set(x.map(J)), ys = new Set(y.map(J));
+        out.push({ keys: ks, add: y.filter(e => !xs.has(J(e))).map(clone), rm: x.filter(e => !ys.has(J(e))).map(clone) });
+      } else out.push({ keys: ks, value: clone(y) });
+    }
+    return out;
+  }
+  function applyPatch(data, op) {
+    data = isObj(data) ? data : {};
+    let o = data;
+    for (const k of op.keys.slice(0, -1)) { if (!isObj(o[k])) o[k] = {}; o = o[k]; }
+    const last = op.keys[op.keys.length - 1];
+    if (op.del) delete o[last];
+    else if (op.add || op.rm) {
+      const rm = new Set((op.rm || []).map(J));
+      const arr = (Array.isArray(o[last]) ? o[last] : []).filter(e => !rm.has(J(e)));
+      const have = new Set(arr.map(J));
+      for (const e of op.add || []) if (!have.has(J(e))) { arr.push(clone(e)); have.add(J(e)); }
+      o[last] = arr;
+    } else if (op.mode === "max") o[last] = Math.max(+o[last] || 0, +op.value || 0);
+    else if (op.mode && modes[op.mode]) modes[op.mode](o, last, clone(op.value), data);
+    else o[last] = clone(op.value);
+    return data;
+  }
+  // 1つの操作を中身に当てる。conflict：中身が保管場所の最新（端末の写しではない）とき
+  function applyOp(data, op, conflict) {
+    if (op.t === "patch") return applyPatch(data, op);
+    if (op.t === "doc") {
+      // 丸ごとの書き込み（新しいファイル・以前の版から残った送信待ち）。ぶつかったときは黙って置き換えず、最新に重ねる（消した項目は戻らないが、ほかの端末の変更も消えない）
+      if (!conflict) return clone(op.body);
+      let d = isObj(data) ? data : {};
+      for (const p of diff({}, op.body)) d = applyPatch(d, p);
+      return d;
+    }
+    data = isObj(data) ? data : { items: {} }; data.items = isObj(data.items) ? data.items : {};
+    if (op.value === null) delete data.items[op.id]; else data.items[op.id] = clone(op.value);
+    return data;
+  }
   // 送信待ちの変更を、取り直した中身に当て直す（端末の変更を上書きで失わないため）
   function applyPending(path, data) {
-    for (const op of queue) {
-      if (op.path !== path) continue;
-      if (op.t === "doc") data = clone(op.body);
-      else { data = data || { items: {} }; data.items = data.items || {}; if (op.value === null) delete data.items[op.id]; else data.items[op.id] = clone(op.value); }
-    }
+    for (const op of queue) if (op.path === path) data = applyOp(data, op, true);
     return data;
   }
   // 取り直し。画面に要るファイル（need）を先に、同時に6つずつ取る。要るファイルがそろった時点で needDone が解ける
@@ -234,21 +287,16 @@
           let base = files.get(path);
           let sha = tree[path] || base?.sha || null;
           let data;
-          if (ops.some(o => o.t === "item")) {
-            // 項目単位の変更：最新の中身に当てる
-            if (attempt > 1 || (sha && base?.sha !== sha)) {
-              sha = attempt > 1 ? await currentSha(path) : sha;
-              data = sha ? await fetchBlob(sha) : { items: {} };
-            } else data = clone(base?.data) || { items: {} };
-            data.items = data.items || {};
-            for (const o of ops) {
-              if (o.t === "doc") data = clone(o.body);
-              else if (o.value === null) delete data.items[o.id];
-              else data.items[o.id] = clone(o.value);
-            }
-          } else {
-            data = clone(ops[ops.length - 1].body);
+          // 新しいファイルを丸ごと書くだけ（控えなど）のときは、そのまま送る
+          const plain = attempt === 1 && ops.every(o => o.t === "doc") && !sha;
+          if (plain) data = clone(ops[ops.length - 1].body);
+          else {
+            // ぶつかったとき・ほかの端末が先に書いたと分かっているときは、最新を読んで、この端末の操作だけを当て直す
+            let conflict = attempt > 1 || !!(sha && base?.sha !== sha) || !base;
             if (attempt > 1) sha = await currentSha(path);
+            if (conflict) data = sha ? await fetchBlob(sha) : {};
+            else data = clone(base.data) || {};
+            for (const o of ops) data = applyOp(data, o, conflict);
           }
           const res = await putFile(path, data, sha, `アプリから更新：${path}`);
           if (res.ok) {
@@ -282,7 +330,15 @@
     REPO,
     token,
     setToken(t) { LS.set("shelf.token", t); refresh(); },
-    clearToken() { LS.del("shelf.token"); },
+    // 鍵を消す。wipe：端末に置いた記録の写しと送信待ちも消す（人に渡す端末のため）
+    async clearToken(wipe) {
+      LS.del("shelf.token");
+      if (!wipe) return;
+      try { if (idbP) (await idbP).close(); } catch {}
+      idbP = null; files.clear(); tree = {}; known = {}; queue = [];
+      await new Promise(res => { try { const r = indexedDB.deleteDatabase("shelf"); r.onsuccess = r.onerror = r.onblocked = () => res(); } catch { res(); } });
+      try { for (const k of Object.keys(localStorage)) if (/^shelf\./.test(k)) localStorage.removeItem(k); } catch {}
+    },
     deviceName() {
       let d = LS.get("shelf.device", "");
       if (!d) { const ua = navigator.userAgent; d = (/Android/.test(ua) ? "Android" : "パソコン") + "-" + Math.random().toString(36).slice(2, 6); LS.set("shelf.device", d); }
@@ -387,18 +443,43 @@
     has: path => files.has(path),
     read: path => files.get(path)?.data ?? null,
     list: prefix => [...files.keys()].filter(p => p.startsWith(prefix)),
-    // 文書を丸ごと書く
-    writeDoc(path, body) {
-      enqueue({ t: "doc", path, body: clone(body) }); bump(path);
-      files.set(path, { sha: files.get(path)?.sha, data: clone(body) });
+    // 文書を書く。保管場所にすでにあるファイルは、丸ごとではなく「変えた所だけ」を送る（ほかの端末・定期タスクの変更を消さないため）。
+    // base：呼び出し側が読んだときの中身（省くと端末の今の写し）。この中身と body の差だけを送る
+    writeDoc(path, body, base) {
+      const cur = files.get(path);
+      const from = base !== undefined ? base : cur?.data;
+      if (from == null && !(path in known) && !(path in tree)) {
+        enqueue({ t: "doc", path, body: clone(body) }); bump(path);
+        files.set(path, { sha: cur?.sha, data: clone(body) });
+        persistFile(path); setStatus({ state: "pending" }); emit(path, false);
+        return;
+      }
+      Shelf.patch(path, diff(from || {}, body));
+    },
+    // 一部だけ書く。ops：[{keys:[...], value} | {keys, del:1} | {keys, add, rm} | {keys, value, mode}]
+    patch(path, ops) {
+      if (!ops || !ops.length) return;
+      const list = ops.map(p => ({ ...clone(p), t: "patch", path }));
+      enqueueMany(list); bump(path);
+      const cur = files.get(path);
+      let data = clone(cur?.data) || {};
+      for (const o of list) data = applyPatch(data, o);
+      files.set(path, { sha: cur?.sha, data });
       persistFile(path); setStatus({ state: "pending" }); emit(path, false);
     },
+    // 当て方に名前を付けて足す（fn(入れ物, 鍵, 値, ファイル全体)）
+    patchMode(name, fn) { modes[name] = fn; },
+    diff: (a, b) => diff(a, b),
+    applyPatch: (d, op) => applyPatch(clone(d), op),
     // {items:{}} 形式のファイルの1項目を書く（null で消す）
-    writeItem(path, id, value) {
-      enqueue({ t: "item", path, id, value: value === null ? null : clone(value) }); bump(path);
+    writeItem(path, id, value) { Shelf.writeItems(path, { [id]: value }); },
+    // {items:{}} 形式のファイルのいくつもの項目を一度に書く（{id: 値 または null}）
+    writeItems(path, map) {
+      const ids = Object.keys(map); if (!ids.length) return;
+      enqueueMany(ids.map(id => ({ t: "item", path, id, value: map[id] === null ? null : clone(map[id]) }))); bump(path);
       const cur = files.get(path) || { sha: undefined, data: { items: {} } };
       const data = clone(cur.data) || { items: {} }; data.items = data.items || {};
-      if (value === null) delete data.items[id]; else data.items[id] = clone(value);
+      for (const id of ids) { if (map[id] === null) delete data.items[id]; else data.items[id] = clone(map[id]); }
       files.set(path, { sha: cur.sha, data });
       persistFile(path); setStatus({ state: "pending" }); emit(path, false);
     },
@@ -413,14 +494,21 @@
   // 同じ形の窓口を用意し、中身を shelf-data のファイルにつなぐ。
   Shelf.legacyClaude = function (opts) {
     const { docPath, virtual = {} } = opts;
+    // 画面が最後に受け取った・送った中身。set のときはこれとの差だけを送る（画面がまだ取り込んでいない、ほかの端末の変更を消さないため）
+    const seen = new Map();
     function snap(data, pending) { return { exists: data != null, data: () => clone(data), metadata: { hasPendingWrites: !!pending, fromCache: false } }; }
     function ref(full) {
       const v = virtual[full];
       const path = v ? null : docPath(full);
       return {
         id: full.split("/").pop(), path: full,
-        async get() { return snap(v ? v() : Shelf.read(path), false); },
-        async set(body) { if (v) throw Object.assign(new Error("読み取り専用"), { code: "invalid_argument" }); Shelf.writeDoc(path, body); },
+        async get() { const d = v ? v() : Shelf.read(path); if (!v && !seen.has(path)) seen.set(path, clone(d)); return snap(d, false); },
+        async set(body) {
+          if (v) throw Object.assign(new Error("読み取り専用"), { code: "invalid_argument" });
+          const base = seen.has(path) ? seen.get(path) : Shelf.read(path);
+          Shelf.writeDoc(path, body, base == null && !Shelf.has(path) ? undefined : (base || {}));
+          seen.set(path, clone(body));
+        },
         async update(body) { const cur = Shelf.read(path) || {}; Shelf.writeDoc(path, { ...cur, ...body }); },
         onSnapshot(next, err) {
           const watchPath = v ? (opts.virtualSource && opts.virtualSource[full]) : path;

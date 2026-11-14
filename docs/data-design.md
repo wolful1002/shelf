@@ -25,6 +25,12 @@
 ## 2. 書き込みの仕組み
 
 - **変更は小さな「操作」で送る。** 例：「記録 b8k2… の保管場所を『書斎A-1』にする」。アプリはファイルを読み、操作を当て、書き戻す。書き戻すときに別の端末が先に書いていたら（GitHubが409を返す）、読み直して同じ操作を当て直す。こうすると、2台で別々の本を同時に変えても、どちらの変更も残る。
+- **操作は3種類**（`app/store.js`。2026-11-14 に3つ目を足し、ファイル丸ごとの上書きをやめた。修正指示書 A-4）：
+  - `item`：`{items:{}}` 形式のファイルの記録1件を書く・消す（蔵書・確認待ち・読書の状況・SNSで決めたことなど）。`Shelf.writeItem`・`Shelf.writeItems`。まとめて登録するとき（`Lib.batchCommit`）も記録1件ずつ積み、送るときにファイルごとに1回にまとめる。
+  - `patch`：ファイルの一部だけを書く（例：`books.json` の `read` の中の1作品、`settings.json` の `places` の1か所）。`Shelf.patch(path, [{keys, value | del | add・rm | mode}])`。`Shelf.writeDoc(path, 中身, 読んだときの中身)` は、読んだときの中身との差をこの操作に直して積む。並び（`offlist.json` の `items` など物の並び）は足し引きで持つ。保管場所のラベルの番号は `mode:"label"` で、ぶつかったら送るときに次の空いた番号にずらす。
+  - `doc`：新しいファイル（`backup/` の控えなど）を丸ごと書く。ぶつかったときは最新を読み、その上に重ねる（黙って置き換えない）。
+- **チェッカーの画面の保存**：チェッカーは記録を丸ごと保存する作りのままなので、橋渡し（`Shelf.legacyClaude`）が、画面が前回受け取った・送った中身との差を取って `patch` に直してから積む（画面がまだ取り込んでいない、ほかの端末の変更を消さない）。
+- **自動実行・定期タスク**：送れなかったときは最新を取り込み、自分の結果だけを載せ直す。強制的な上書きはしない。
 - **同じ記録を2台で同時に変えた場合**は、後から届いた変更が勝つ。記録ごとに更新時刻 `u` を持つ。
 - **送信待ち**：電波のないときの操作は端末に貯め、電波が戻ったら順に送る（試作で確認済み）。
 - **ファイルの大きさ**：1つのファイルを1MB未満に保つ。蔵書を16に分けるのはこのため（3,000冊でも1ファイル約60KB）。分け先は記録の番号の FNV-1a（32ビット）を16で割った余り（16進1桁）。
@@ -53,14 +59,22 @@
 | `media` | 紙か電子か | `paper`／`ebook` |
 | `loc` | 保管場所（電子はストア名） | `書斎・本棚A・1段目` |
 | `note` | 版のメモ | |
-| `st` | 状態 | `own`（所有）／`off`（所有を外した）／`gone`（手放した） |
-| `src` | 登録の入口 | `scanner`・`camera`・`search`・`manual`・`checker`・`booklog`・`purchase` |
+| `st` | 状態 | `own`（所有）／`off`（所有を外した）／`gone`（手放した）／`want`（読みたい・未所持。欲しいものリストなど） |
+| `src` | 登録の入口 | `scanner`・`camera`・`search`・`manual`・`checker`・`booklog`・`purchase`・`photo`（本棚の写真）・`wishlist`（欲しいものリスト） |
+| `asin` | Amazon・Kindle の商品番号 | |
+| `buy` | 購入の記録（経路ごとに足す）。シリーズでは `v` に巻 | `[{"shop":"Kindle","d":"2021-03-04"}]` |
+| `wl` | 欲しいものリストの名前 | `洞窟` |
+| `eloc` | 紙と電子の両方を持つ本の、電子のストア名（`loc` は紙の置き場所） | `Kindle` |
+| `eds` | シリーズの版違い（モノクロ版・完全版など）の巻 `{版の名前:{vols:{…}}}` | |
+| `sr`, `sv` | 副題の付いた巻のシリーズ名と、シリーズの中の順番 | `ハリー・ポッター`、`"4"` |
+| `srNo` | 本人が「シリーズではない」と答えたシリーズ名（もう聞かない） | |
+| `cover` | 表紙の画像の URL | |
 | `nk` | 必読書チェッカーの作品の番号（結び付いていれば） | `52abdb42` |
 | `link` | 照合の状態 | `auto`（自動）・`manual`（手で選んだ）・`none`（結び付けない）・`wait`（確認待ち） |
 | `series`, `vol` | 小説のシリーズの各巻のとき、シリーズの記録の番号と巻 | |
 | `vols` | シリーズの記録のとき、巻ごとの所持・ISBN・読了 | `{"1":{"own":1,"isbn":"978…","read":1}}` |
 | `fm` | 同じ本の版の一覧（単行本・文庫・分冊・出版社違い・紙と電子）。版ごと・分冊の巻ごとに所有の印 `own` を持つ。記録の `isbn`・`fmt`・`pub` などは最初に登録した版のまま | `[{"k":"f1","fmt":"単行本","pub":"集英社","parts":[{"v":"","isbn":"978…","own":1}]},{"k":"f2","fmt":"文庫","parts":[{"v":"上","isbn":"978…","own":1},{"v":"下","own":1}]}]` |
-| `alt` | （旧）別の版の一覧。`fm` に置き換えた。残っていれば、開いたときに `fm` に移す | |
+| `alt` | （旧）別の版の一覧。`fm` に置き換えた。2026-11-14 に残っていた10件を `fm` に移した | |
 | `blk` | ブクログの記録から読了を取り込んだ印 | |
 | `total`, `done` | シリーズの既刊数、完結。週1回の定期タスクが調べて入れる（`totalAuto`・`doneAuto` が自動で入れた印。手で直すと印が外れ、以後は上書きしない）。`totalAt` 確かめた日、`totalSrc` 出典、`totalTry` 確かめきれなかった日、`totalPrev`・`totalUp` 既刊数が増えたときの前の値と日 | |
 | `added`, `u` | 登録日時、更新日時 | |
@@ -69,11 +83,12 @@
 
 - **チェッカーの作品**：読了・読みたいは `records/novels-checker/books.json`（今までの形のまま）に持つ。蔵書の本がチェッカーの作品と結び付いていれば、読了はこちらに1つだけ持つ（二重に持たない）。所有もここに写し、蔵書と双方向にそろえる。
 - **チェッカーに無い本**：`records/reading.json` の `{ "items": { "b:記録の番号": 状況 } }`。シリーズの巻の読了は、シリーズの記録の `vols` の `read` に持つ。
+- **読書中**（2026-11-14）：`records/reading.json` に `s:"now"` で持つ。チェッカーの作品と結び付いた本は鍵を `"n:作品の番号"` にする（チェッカーの `books.json` の形を変えないため）。読了にすると外れる。
 
 | 項目 | 意味 |
 | --- | --- |
-| `s` | `read`（読了） |
-| `d` | 読了日（分からなければなし） |
+| `s` | `read`（読了）／`now`（読書中。2026-11-14） |
+| `d` | 読了日・読み始めた日（分からなければなし） |
 | `via` | 誰が付けたか：`manual`（手で）・`booklog`・`post`（SNSの投稿から。第2版） |
 | `n` | 読んだ回数 |
 | `u` | 更新日時 |
@@ -86,7 +101,9 @@
 
 `{ "items": { 番号: { "type": 種類, "target": 対象, "cands": 候補, "why": 根拠, "at": 作成日時 } } }`。決めたら消す。決めた結果は該当する記録に書く。
 
-種類：`link`（チェッカーの作品との結び付けに迷った）・`cat`（本の種類を判定できない）・`bib`（書誌が見つからない）・`check`（書誌が試し読み版などで怪しい）・`unowned`（スキャンで登録した本の所有がチェッカーで外された）・`fmt`（版が複数あると分かったが、どの版を持っているか分からない）。
+種類：`link`（チェッカーの作品との結び付けに迷った）・`cat`（本の種類を判定できない）・`bib`（書誌が見つからない）・`check`（書誌が試し読み版などで怪しい）・`unowned`（スキャンで登録した本の所有がチェッカーで外された）・`same`（同じ本かどうか。書名が同じ・同じISBNの記録がほかにある）・`dupbuy`（2回以上買った本）・`read`（読了の候補。Kindle の「読んだ本」など）・`series`（シリーズかどうか）・`blread`（ブクログの読了記録と蔵書の本が同じか）・`fmt`（版が複数あると分かったが、どの版を持っているか分からない）。
+
+同じISBNの記録（2026-11-14）：アプリと毎朝の定期タスクは、記録にISBNが新しく入ったとき、所有しているほかの記録に同じISBNが無いかを見て、あれば `same` を出す（自分ではまとめない）。まとめるときは `Lib.mergeSame`（本と本は `Lib.mergeInto`、本とシリーズの巻は本を巻へ移す）。
 
 ### 版（判型）のまとめ方（2026-11-04）
 
@@ -111,9 +128,9 @@
 ## SNSの感想（2026-11-13）
 
 - `inbox/sns/posts-YYYY.json`：スプレッドシートの ShelfExport.gs が毎朝送る自分の投稿（作品名のあるものだけ）。`{posts:[{id, src, d, text, work:[作品名], url}]}`。`inbox/sns/aliases.json` は作品名の言い換えと自作原稿の印。
-- `records/sns/links.json`：shelf-data の `tools/sns_match.py`（GitHub Actions「SNSの感想の照合」）が書く。`{at, links:{"種類:番号":[投稿の番号]}, posts:{番号:{d, text, url}}}`。種類は novel・film・lib・show・off（必読書と結び付いた本は novel にまとめる）。必読書・映画・蔵書・ドラマとアニメの詳細の「自分の感想」（app/mine.js）が使う。
-- `records/sns/review.json`：本人が確かめるもの。`{at, cands:[{target, t, kind, posts, d, vol?, ep?}], ask:[{post, w, cands, verb}], nowhere:[{w, posts}], posts:{番号:{d, text, url}}}`。kind は done・again・now・want・doing・buy（画面に出すのは前の4つ）。
-- `records/sns/decided.json`：アプリの「SNSの感想」で本人が決めたこと。`{items:{"c|種類:番号|kind":{v:"ok"|"no", at}, "a|投稿|作品名":{to:"種類:番号"|"", at}}}`。照合はこれを守る。
+- `records/sns/links.json`：shelf-data の `tools/sns_match.py`（GitHub Actions「SNSの感想の照合」）が書く。`{at, links:{"種類:番号":[投稿の番号]}}`。結び付いた投稿の本文は年ごとに `records/sns/posts-YYYY.json`（`{at, posts:{番号:{d, text, url}}}`）に分けた（2026-11-14。1MB に近づいたため）。種類は novel・film・lib・show・off（必読書と結び付いた本は novel にまとめる）。必読書・映画・蔵書・ドラマとアニメの詳細の「自分の感想」（app/mine.js）が使う。
+- `records/sns/review.json`：本人が確かめるもの。`{at, cands:[{id, target, t, kind, posts, d, vol?, ep?}], ask:[{post, w, cands, verb}], nowhere:[{w, posts}], posts:{番号:{d, text, url}}}`。kind は done・again・now・want・doing・buy（画面に出すのは前の4つ）。読み返した・観直した（again）は投稿の日ごと（1日違いは同じ回）に別の候補。同じ題名の候補が複数あるときは、本文の作者・監督の名前で絞り、投稿より後に公開・発表された作品には自動で結び付けない。「読んだことがない」などの否定は読んだとしない。照合の先には所有を外した本（off）も入れる（2026-11-14 本人が決定）。
+- `records/sns/decided.json`：アプリの「SNSの感想」で本人が決めたこと。`{items:{"p|種類:番号|kind|投稿の番号":{v:"ok"|"no", at}, "a|投稿|作品名":{to:"種類:番号"|"", at}}}`。照合はこれを守る。
 - 記録に付けると：必読書は books.json の read（読み返しは rr）、映画は watched.json の seen・rw・want（ts の印付き）、蔵書は reading.json か巻の read、ドラマ・アニメは shows.json の st・w を書く。夜中の投稿を考え、記録の日と1日違いは同じ回とみなす。
 
 ## 作品のページ（2026-11-13・work.html）
@@ -124,9 +141,9 @@
 
 ## 映画館の予約（2026-11-14）
 
-- `inbox/mail/<メールの番号>.json`：Claude の毎朝の定期タスク「映画館の予約メールの取り込み」が、予約用のメール箱（自動転送先）から写す予約確認メール `{id, date, from, subject, body}`。
-- `records/tickets.json`：shelf-data の `tools/tickets.py`（GitHub Actions「映画館の予約」）が作る。`{at, items:{番号:{src, venue, t, raw, fmt, start, end, screen, seat, no, mails, cancel?, fk?, tm?, y?}}, unread?}`。対応しているのはローソン・ユナイテッドシネマ グループとイオンシネマ（e席リザーブ）。
-- `records/tickets-ans.json`：本人が決めたこと `{items:{番号:{v:"seen"|"no", at}}}`。「観た」を選ぶと、リストの映画は watched.json の seen・rw・wh、リスト外の映画は offlist.json に、日付と館の名前で記録する（app/tickets.js）。
+- `inbox/mail/<メールの番号>.json`：Claude の週1回（毎週日曜の朝）の定期タスク「映画館の予約メールの取り込み」が、予約用のメール箱（自動転送先）から写す予約確認メール `{id, date, from, subject, body}`。
+- `records/tickets.json`：shelf-data の `tools/tickets.py`（GitHub Actions「映画館の予約」）が作る。`{at, items:{番号:{src, venue, t, raw, fmt, start, end, endGuess?, rt?, screen, seat, mails, cancel?, fk?, tm?, y?, pick?}}, unread?}`。予約番号は持たない。イオンシネマは終わりの時刻が無いので、上映時間＋15分（分からなければ3時間）で `end` を作る（`endGuess`）。`pick` は映画チェッカーの古い作品と同じ題名の新作があるときの新作 `{tm, y, t}`（どちらを観たかは本人がホームで選ぶ）。読めなかったメール（`unread`）はホームと Discord に出す（ACチケットは数えない）。対応しているのはローソン・ユナイテッドシネマ グループとイオンシネマ（e席リザーブ）。
+- `records/tickets-ans.json`：本人が決めたこと `{items:{番号:{v:"seen"|"no", which?:"old"|"new", at}}}`。「観た」を選ぶと、リストの映画は watched.json の seen・rw・wh、リスト外の映画は offlist.json に、日付と館の名前で記録する（app/tickets.js）。
 - ホームの「映画館の予約」、映画チェッカーの一覧の「予約」の印と詳細、作品のページに出す。
 
 ## Discord へのお知らせ（2026-11-14）
@@ -146,3 +163,10 @@
 - `records/writing/notes.json`：抜き書き `{items:{番号:{tg, text, page, memo, tags, ds, src, at, u}}}`。
 - 作品は `app/works.js` の「種類:番号」（novel・film・lib・show・off）で指す。参考文献の形もここで作る（本：著者『書名』（訳者訳）出版社（レーベル）、刊行年。映画：監督『題名』（製作国、公開年）。）。
 - 画面：`writing.html`（原稿の一覧・抜き書きの一覧）、`writing.html?d=原稿の番号`（資料・抜き書き・参考文献リスト）、作品のページの「執筆」の欄（資料にする原稿・抜き書き）。
+
+## 2026-11-14 の修正（修正指示書）
+
+- 所持確認（`Lib.check`）：手放した・所有を外した本は「持っていません（以前持っていた）」、シリーズの巻は所有の印がある巻だけ「持っています」。書誌が取れず書名で照合できないとき（電波なし）は「持っていません」と言い切らず、書名で確かめる欄を出す。一度引いた書誌は端末に控える（`Biblio.lookupCached`・localStorage の `shelf.bibCache`）。
+- ドラマ・アニメの新しいシーズン：放送日が今日以前で1話以上のシーズンだけを数える（`newS`）。放送日が決まったが始まっていないシーズンは `soon:{n, air}` に入れ、一覧に「次のシーズン 〇月〇日から」と出す。
+- TMDB の鍵：`records/keys.json` の `tmdbType` が `token` なら、自動実行の道具も読み取りアクセストークンで問い合わせる。
+- 外部の部品（バーコードの読み取り・ラベル印刷）は `app/vendor/` に置き、自分のところから読み込む。

@@ -183,7 +183,7 @@ $("q").addEventListener("input", search);
 
 (async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); return; }
-  await Shelf.init({ need: ["works/novels.json", "works/films.json", "works/adaptations.json", "records/library/", "records/reading.json", "records/novels-checker/books.json", "records/films-checker/watched.json", "records/films-checker/offlist.json", "records/shows.json", "records/discs.json", "records/services.json", "records/sns/links.json", "records/settings.json", ...Tickets.paths, ...Drafts.paths] });
+  await Shelf.init({ need: ["works/novels.json", "works/films.json", "works/adaptations.json", "records/library/", "records/reading.json", "records/novels-checker/books.json", "records/films-checker/watched.json", "records/films-checker/offlist.json", "records/shows.json", "records/discs.json", "records/services.json", "records/sns/links.json", "records/sns/posts-", "records/settings.json", ...Tickets.paths, ...Drafts.paths] });
   render();
   let t = null;
   Shelf.onAny(() => { if (document.activeElement?.closest?.("#wrCard form")) return; clearTimeout(t); t = setTimeout(() => { Works.reset(); render(); search(); }, 300); });

@@ -168,6 +168,13 @@ async function registerCode(c, src) {
   const r = await Lib.register(inp);
   const it = r.item;
   if (r.status === "alt") { Scan.beep("ok"); lastReg = { id: it.id, at: Date.now() }; log("ok", `別の版として追加：<b>${esc(it.t)}</b>（同じ作品の記録にまとめました）`); return; }
+  if (r.revived) {
+    // 手放した・所有を外した本を読んだ：買い直した本として所有に戻した（「持っています」の音は鳴らさない）
+    Scan.beep("ok"); lastReg = { id: it.id, at: Date.now() };
+    log("ok", `所有に戻しました：<b>${esc(it.t)}</b>${r.vol != null ? ` ${r.ed ? esc(r.ed) + " " : ""}${r.vol}巻` : ""} <span class="pill warn">以前は${r.revived === "gone" ? "手放した" : "所有を外した"}本</span>`,
+      () => { const y = JSON.parse(JSON.stringify(Lib.get(it.id))); Lib.setStatus(y, r.revived); });
+    return;
+  }
   if (r.status === "dup" || r.status === "voldup") {
     Scan.beep("dup");
     log("dup", `所持済み：<b>${esc(it.t)}</b>${r.vol != null ? ` ${r.ed ? esc(r.ed) + " " : ""}${r.vol}巻` : ""}・${esc(it.loc || "場所未設定")}${r.filled ? `<span class="pill">空いていた項目を埋めました</span>` : ""}`);
@@ -181,7 +188,9 @@ async function registerCode(c, src) {
   if (r.upgraded) tags.push(`<span class="pill">チェッカーの仮登録を本の情報で更新</span>`);
   if (r.match?.status === "wait") tags.push(`<span class="pill warn">結び付けは確認待ち</span>`);
   if (!inp.bib && c.kind !== "magazine") tags.push(`<span class="pill warn">書誌なし・確認待ち</span>`);
-  const undo = r.status === "vol" && !r.newSeries
+  const undo = r.volAdded
+    ? () => { const s = JSON.parse(JSON.stringify(Lib.get(it.id))); const m = r.ed ? s.eds?.[r.ed]?.vols : s.vols; if (m?.[r.vol]) delete m[r.vol].own; Lib.put(s); }
+    : r.status === "vol" && !r.newSeries
     ? () => { const s = JSON.parse(JSON.stringify(Lib.get(it.id))); if (r.ed) delete s.eds?.[r.ed]?.vols?.[r.vol]; else delete s.vols[r.vol]; Lib.put(s); }
     : () => { if (it.nk) Lib.setOwn(it.nk, false); Lib.qDelFor(it.id); Lib.remove(it.id); };
   log("ok", `登録：<b>${esc(it.t)}</b>${r.vol != null ? ` ${r.ed ? esc(r.ed) + " " : ""}${r.vol}巻` : ""}・${esc(it.cat)}${it.loc ? "・" + esc(it.loc) : ""} ${tags.join(" ")}`, undo);
@@ -196,8 +205,8 @@ const setBatch = b => { try { localStorage.setItem(BKEY, JSON.stringify(b)); } c
 function addBatch(code) {
   const b = batch();
   if (b.some(x => x.code === code)) { Scan.beep("dup"); return; }
-  const owned = Lib.byIsbn(code);
-  b.unshift({ code, loc: curLoc, media, at: Date.now(), owned: !!owned });
+  const owned = Lib.ownsIsbn(code);
+  b.unshift({ code, loc: curLoc, media, at: Date.now(), owned });
   setBatch(b); Scan.beep(owned ? "dup" : "ok"); renderBatch();
   if (!owned) Biblio.lookup(code).then(bib => { const x = batch(); const e = x.find(y => y.code === code); if (e) { e.t = bib?.t || "（書誌なし）"; e.a = bib?.a || ""; setBatch(x); renderBatch(); } });
 }
@@ -213,7 +222,7 @@ $("batchReg").onclick = async () => {
   $("batchReg").disabled = true;
   let n = 0;
   for (const x of b.slice().reverse()) {
-    if (x.owned || Lib.byIsbn(x.code)) continue;
+    if (Lib.ownsIsbn(x.code)) continue;
     const bib = await Biblio.lookup(x.code);
     const r = await Lib.register({ isbn: x.code, bib, src: "scanner", loc: x.loc || undefined, media: x.media });
     if (r.status === "new" || r.status === "vol") n++;
@@ -276,7 +285,7 @@ function listRows() {
   if (LST.cat) rows = rows.filter(it => it.cat === LST.cat);
   if (LST.media) rows = rows.filter(it => { const m = it.media || "paper"; return m === LST.media || m === "both"; });
   if (LST.loc) rows = rows.filter(it => (it.loc || "") === (LST.loc === "-" ? "" : LST.loc));
-  if (LST.read && LST.read !== "want") rows = rows.filter(it => LST.read === "read" ? Lib.isRead(it) : !Lib.isRead(it));
+  if (LST.read && LST.read !== "want") rows = rows.filter(it => LST.read === "read" ? Lib.isRead(it) : LST.read === "now" ? Lib.isReading(it) : !Lib.isRead(it));
   if (LST.link) rows = rows.filter(it => LST.link === "yes" ? !!it.nk : LST.link === "wait" ? it.link === "wait" : !it.nk && it.link !== "wait");
   const k = { title: it => Biblio.norm(it.t), author: it => Biblio.norm(it.a), pub: it => Biblio.norm(it.pub), loc: it => it.loc || "", year: it => it.y || 0, added: it => Date.parse(it.added) || 0 }[LST.sort];
   // 昇順・降順を切り替える。値の無い本（出版社・場所・刊行年が空）は、どちらの向きでも最後に置く
@@ -326,6 +335,8 @@ function rowHtml(it) {
     it.fm?.length > 1 || it.fm?.[0]?.parts.length > 1 ? `<span class="pill acc" title="版ごとの所有">${esc(Lib.fmSummary(it))}</span>` : "",
     it.media === "ebook" ? `<span class="pill">電子</span>` : it.media === "both" ? `<span class="pill">紙＋電子</span>` : "",
     it.st === "want" ? `<span class="pill acc">読みたい（未所持）</span>` : "",
+    nextPill(it),
+    Lib.isReading(it) ? `<span class="pill acc">読書中${Lib.readingSince(it) ? "（" + esc(Lib.readingSince(it)) + "〜）" : ""}</span>` : "",
     it.nk ? `<span class="pill acc">必読書</span>` : it.link === "wait" ? `<span class="pill warn">結び付け確認待ち</span>` : "",
   ].join(" ");
   const pick = LPICK.on ? `<input type="checkbox" class="lpick" data-pick="${esc(it.id)}" aria-label="選ぶ"${LPICK.ids.has(it.id) ? " checked" : ""}>` : "";
@@ -408,11 +419,19 @@ $("list").addEventListener("click", e => {
 
 // ---------- 作品のシリーズ（副題つきの巻） ----------
 const svNum = v => { const m = String(v ?? "").match(/^(\d+)(?:-(\d+))?/); return m ? +m[1] + (m[2] ? +m[2] / 1000 : 0) : 9999; };
+// 次に読む巻（読み始めたシリーズだけ。持っていなければ「未所持」）
+function nextPill(it) {
+  if (it.kind !== "series" || it.issues || !Object.values(it.vols || {}).some(v => v.read)) return "";
+  const n = Lib.nextVol(it); if (!n) return `<span class="pill ok">既刊はすべて読了</span>`;
+  return `<span class="pill ${n.own ? "" : "warn"}">次に読む ${n.vol}巻${n.own ? "" : "（未所持）"}</span>`;
+}
 const srSort = (a, b) => svNum(a.sv) - svNum(b.sv) || (Biblio.norm(a.t) < Biblio.norm(b.t) ? -1 : 1);
 function seriesMembersOf(it) { const k = Lib.srKey(it.sr); return Object.values(Lib.items()).filter(x => x.sr && Lib.srKey(x.sr) === k).sort(srSort); }
 function seriesSiblingsHtml(it) {
   const mem = seriesMembersOf(it);
-  return `<p class="small muted">シリーズ『${esc(it.sr)}』の本（${mem.length}冊）：${mem.map(x => x.id === it.id ? `<b>${esc(x.sv ? x.sv + "．" : "")}${esc(x.t)}</b>` : `<button type="button" class="linklike" data-sib="${esc(x.id)}">${esc(x.sv ? x.sv + "．" : "")}${esc(x.t)}</button>`).join("／")}</p>`;
+  const nx = Lib.srNext(it);
+  const next = nx ? `<p class="small">次に読む：${nx.item.id === it.id ? `<b>この本</b>` : `<button type="button" class="linklike" data-sib="${esc(nx.item.id)}">${esc(nx.item.sv ? nx.item.sv + "．" : "")}${esc(nx.item.t)}</button>`}${nx.own ? "" : ` <span class="pill warn">未所持</span>`}</p>` : `<p class="small">このシリーズの本はすべて読了しています</p>`;
+  return next + `<p class="small muted">シリーズ『${esc(it.sr)}』の本（${mem.length}冊）：${mem.map(x => x.id === it.id ? `<b>${esc(x.sv ? x.sv + "．" : "")}${esc(x.t)}</b>` : `<button type="button" class="linklike" data-sib="${esc(x.id)}">${esc(x.sv ? x.sv + "．" : "")}${esc(x.t)}</button>`).join("／")}</p>`;
 }
 function seriesSummary(mem) {
   const own = mem.filter(x => x.st === "own"), read = own.filter(x => Lib.isRead(x));
@@ -459,6 +478,7 @@ function openDetail(id) {
         <span class="pill ${it.st === "own" ? "ok" : it.st === "want" ? "acc" : "warn"}">${{ own: "所有", off: "所有を外した", gone: "手放した", want: "読みたい（未所持）" }[it.st]}</span>
         ${it.st === "want" ? `<button type="button" class="small" data-st="own">買った（所有にする）</button>` : it.st !== "own" ? `<button type="button" class="small" data-st="own">所有に戻す</button>` : `<button type="button" class="quiet small" data-st="off">所有を外す</button><button type="button" class="quiet small" data-st="gone">手放した</button>`}
       </div>
+      ${it.kind === "series" || read ? "" : `<div class="row"><label class="row" style="gap:6px"><input type="checkbox" id="dNow"${Lib.isReading(it) ? " checked" : ""}> 読書中</label>${Lib.readingSince(it) ? `<span class="small muted">${esc(Lib.readingSince(it))}から</span>` : ""}</div>`}
       ${it.kind === "series" ? "" : `<div class="row"><label class="row" style="gap:6px"><input type="checkbox" id="dRead"${read ? " checked" : ""}> 読了</label>
         <input type="date" id="dReadDate" value="${esc(rd)}" aria-label="読了日"><button type="button" class="small quiet" id="dToday">今日</button><span class="small muted">${it.nk ? "必読書チェッカーと共有しています" : ""}</span></div>
         <p class="small muted">読了と日付は、押したときにすぐ記録されます。</p>`}
@@ -510,6 +530,7 @@ function openDetail(id) {
     q("#dReadDate").onchange = () => { if (q("#dReadDate").value) q("#dRead").checked = true; apply(); };
     q("#dToday").onclick = () => { q("#dReadDate").value = UI.today(); q("#dRead").checked = true; apply(); };
   }
+  if (q("#dNow")) q("#dNow").onchange = () => { const on = q("#dNow").checked; Lib.setReadingNow(Lib.get(it.id), on, on ? UI.today() : null); UI.toast(on ? "読書中にしました" : "読書中を外しました"); };
   q("#dLocSave").onclick = () => { const x = JSON.parse(JSON.stringify(Lib.get(it.id))); const l = q("#dLoc").value.trim(); if (l) x.loc = l; else delete x.loc; Lib.put(x); it.loc = x.loc; UI.toast("保管場所を保存しました"); };
   d.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { Lib.setStatus(it0, b.dataset.st); UI.toast(it0.st === "want" ? "所有にしました" : { own: "所有に戻しました", off: "所有を外しました", gone: "手放したことにしました" }[b.dataset.st]); d.close(); });
   d.querySelectorAll("[data-sib]").forEach(b => b.onclick = () => { d.close(); setTimeout(() => openDetail(b.dataset.sib), 50); });
@@ -600,6 +621,7 @@ function seriesHtml(it) {
   return `<div class="card" style="background:var(--bg)">
     <div class="row"><h3 class="grow">${it.issues ? "号ごとの所持と読了" : "巻ごとの所持と読了"}</h3><div class="seg" role="group" aria-label="切り替える内容"><button type="button" id="vmOwn" aria-pressed="true">所持</button><button type="button" id="vmRead" aria-pressed="false">読了</button></div></div>
     ${edSeg}
+    ${(() => { if (it.issues) return ""; const n = Lib.nextVol(it); return n ? `<p>次に読む：<b>${n.vol}巻</b>${n.own ? "" : ` <span class="pill warn">未所持</span>`}</p>` : Object.values(it.vols || {}).some(v => v.own) ? `<p class="small">既刊はすべて読了しています</p>` : ""; })()}
     <p class="small muted">${it.issues ? "号" : "巻"}を押すと、上で選んだ内容が切り替わります。下線は読了です。</p>
     <div class="vols" id="vols">${volBtns(it)}</div>
     ${it.issues ? `<div class="row"><label class="f">号を足す<input type="month" id="vAddIssue"></label><button type="button" class="small quiet" id="vAddIssueBtn">足す</button></div>` : `
@@ -766,7 +788,7 @@ $("qList").addEventListener("click", e => {
     if (m.status === "auto") Lib.link(it, m.work.k); else if (m.status === "wait") Lib.qAdd("link", it.id, { why: "必読書チェッカーの作品と結び付けるか、候補から選んでください", cands: m.cands.map(w => w.k) });
   }
   else if (d.qst) { const x = Lib.queue()[d.qst]; const it = Lib.get(x.target); Lib.qDel(d.qst); if (d.st !== "off") Lib.setStatus(it, d.st); }
-  else if (d.qsame) { const x = Lib.queue()[d.qsame]; const from = Lib.get(x.target), into = Lib.get(d.into); Lib.qDel(d.qsame); if (from && into) { Lib.mergeInto(into, from); UI.toast("1件にまとめました"); } }
+  else if (d.qsame) { const x = Lib.queue()[d.qsame]; const from = Lib.get(x.target), into = Lib.get(d.into); Lib.qDel(d.qsame); if (from && into) { const r = Lib.mergeSame(into, from); UI.toast(r ? "1件にまとめました" : "シリーズのどの巻か決まらないため、まとめられませんでした"); } }
   else if (d.qnote) { const x = Lib.queue()[d.qnote]; const it = JSON.parse(JSON.stringify(Lib.get(x.target))); it.note = [it.note, d.note].filter(Boolean).join("／"); Lib.put(it); Lib.qDel(d.qnote); }
   else if (d.qbl) { answerBlread(d.qbl, d.into || null); UI.toast(d.into ? "読了にしました" : "違う本として、もう聞きません"); }
   else if (d.qser) { const x = Lib.queue()[d.qser]; if (x) { Lib.seriesAnswer(x, !!d.on); UI.toast(d.on ? "シリーズにまとめました" : "シリーズにしないことにしました"); } }
@@ -833,8 +855,13 @@ function renderStats() {
   const tsun = own.filter(it => it.kind !== "series" && !Lib.isRead(it)).length + own.filter(it => it.kind === "series").reduce((s, it) => s + Lib.volMaps(it).reduce((t, [, m]) => t + Object.values(m).filter(v => v.own && !v.read).length, 0), 0);
   const works = Shelf.read(Lib.P.novels); const nd = Lib.ndoc();
   const nOwn = Object.keys(nd.own || {}).length, nAll = works ? works.books.length : 0;
+  // 必読書の掲載作のうち、電子だけで持っている作品（要件 2章・6章）
+  const byNk = new Map(); for (const it of own) if (it.nk) { if (!byNk.has(it.nk)) byNk.set(it.nk, []); byNk.get(it.nk).push(it); }
+  const paper = it => it.fm ? it.fm.some(e => e.media !== "ebook" && e.parts.some(p => p.own)) : it.media !== "ebook";
+  const nEb = [...byNk.values()].filter(its => !its.some(paper)).length;
+  const nNow = Lib.readingList().length;
   $("stats").innerHTML = `
-    <div class="row"><span class="pill acc">総冊数 ${total}冊</span><span class="pill">記録 ${own.length}件（シリーズ ${own.filter(x => x.kind === "series").length}）</span><span class="pill warn">積読 ${tsun}冊</span><span class="pill">必読書の所有 ${nOwn}/${nAll}冊（${nAll ? (nOwn / nAll * 100).toFixed(1) : 0}%）</span></div>
+    <div class="row"><span class="pill acc">総冊数 ${total}冊</span><span class="pill">記録 ${own.length}件（シリーズ ${own.filter(x => x.kind === "series").length}）</span><span class="pill warn">積読 ${tsun}冊</span><span class="pill">必読書チェッカー掲載作の所有率 ${nOwn}/${nAll}冊（${nAll ? (nOwn / nAll * 100).toFixed(1) : 0}%・うち電子だけ ${nEb}冊）</span>${nNow ? `<span class="pill acc">読書中 ${nNow}冊</span>` : ""}</div>
     <h3>種類別</h3>${bars(tally(it => it.cat), total)}
     <h3>紙・電子</h3>${bars(tally(it => it.media === "ebook" ? "電子" : it.media === "both" ? "紙と電子" : "紙"), total)}
     <h3>保管場所別</h3>${bars(tally(it => it.loc), total)}
@@ -881,7 +908,7 @@ $("printLabels").onclick = () => {
 let blShown = 100, blRows = [];
 const blSel = new Set();
 const blSeen = () => Lib.settings().blSeen || {};
-function setBlSeen(fn) { const s = JSON.parse(JSON.stringify(Lib.settings())); s.blSeen = s.blSeen || {}; fn(s.blSeen); Shelf.writeDoc(Lib.P.settings, s); }
+function setBlSeen(fn) { Lib.editSettings(s => { s.blSeen = s.blSeen || {}; fn(s.blSeen); }); }
 // 確認待ち「ブクログの読了記録」で聞いている記録（蔵書の本と同じかどうか答えを待っている）。ここから登録すると二重になるので、登録できなくする
 const blAsked = () => new Set(Object.values(Lib.queue()).filter(q => q.type === "blread").map(q => q.blk));
 let blAskedNow = new Set();

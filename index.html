@@ -10,8 +10,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app/ui.css?v=202611131703">
-<link rel="stylesheet" href="app/bar.css?v=202611131703">
+<link rel="stylesheet" href="app/ui.css?v=202611140941">
+<link rel="stylesheet" href="app/bar.css?v=202611140941">
 </head>
 <body>
 <main class="wrap" id="main">
@@ -75,18 +75,30 @@
     </div>
     <div class="row"><button type="button" class="pri" id="dcSave">保存する</button><button type="button" class="quiet" id="dcDel" hidden>送るのをやめる</button><span class="small muted" id="dcMsg"></span></div>
     <p class="small muted" id="dcLast"></p>
+    <h3 style="font-size:15px;margin:18px 0 4px">この端末の鍵（記録の保管場所）</h3>
+    <p class="small muted">記録を読み書きするための GitHub の鍵は、この端末にだけ置いています。人に貸す・手放す端末では消してください。消すと、端末に置いた記録の写しも消え、この端末からは記録を読めなくなります（送っていない変更があれば、先に送ってから消します）。</p>
+    <div class="row"><button type="button" class="quiet" id="keyClear">この端末から鍵を消す</button><span class="small muted" id="keyMsg"></span></div>
+    <details class="small" style="margin-top:8px"><summary>端末を失くしたとき</summary>
+      <ol>
+        <li>別の端末かパソコンで GitHub にサインインし、右上の自分のアイコン → <b>Settings</b> → 左の一番下の <b>Developer settings</b> → <b>Personal access tokens</b> → <b>Fine-grained tokens</b> を開きます。</li>
+        <li>このアプリに入れた鍵（shelf-data に使える鍵）の <b>Delete</b> を押して消します。これで、失くした端末の鍵は使えなくなります。</li>
+        <li>同じ画面の <b>Generate new token</b> で鍵を作り直します。「Repository access」は <b>Only select repositories</b> で <b>shelf-data</b> だけ、「Permissions」は <b>Contents</b> を <b>Read and write</b> だけにし、期限を付けます。</li>
+        <li>使う端末で、この画面の「鍵を入れ直す」から新しい鍵を入れます。</li>
+        <li>念のため、GitHub の shelf-data の履歴（Commits）に、心当たりのない「アプリから更新」が無いか見ます。あれば、その前の版に戻せます（Claude に頼めます）。</li>
+      </ol>
+    </details>
   </section>
 </main>
 
-<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
-<script src="app/store.js?v=202611131703"></script>
-<script src="app/biblio.js?v=202611131703"></script>
-<script src="app/scan.js?v=202611131703"></script>
-<script src="app/ui.js?v=202611131703"></script>
-<script src="app/lib.js?v=202611131703"></script>
-<script src="app/discs.js?v=202611131703"></script>
-<script src="app/tickets.js?v=202611131703"></script>
-<script src="app/booklog.js?v=202611131703"></script>
+<script src="app/vendor/zxing-0.21.3.min.js?v=202611140941"></script>
+<script src="app/store.js?v=202611140941"></script>
+<script src="app/biblio.js?v=202611140941"></script>
+<script src="app/scan.js?v=202611140941"></script>
+<script src="app/ui.js?v=202611140941"></script>
+<script src="app/lib.js?v=202611140941"></script>
+<script src="app/discs.js?v=202611140941"></script>
+<script src="app/tickets.js?v=202611140941"></script>
+<script src="app/booklog.js?v=202611140941"></script>
 <script>
 "use strict";
 const { $, esc } = UI;
@@ -117,26 +129,35 @@ $("dcSave").onclick = async () => {
   if (!/^https:\/\/(?:\w+\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/.test(k)) { $("dcMsg").textContent = "Discord のウェブフックの URL（https://discord.com/api/webhooks/… の形）を入れてください"; return; }
   // 使える URL かを確かめる（確かめられない環境でも保存は続ける）
   try { const r = await fetch(k); if (r.status === 401 || r.status === 404) { $("dcMsg").textContent = "このウェブフックは見つかりませんでした。消されていないか確かめてください"; return; } } catch (_) {}
-  Shelf.writeDoc(KEYS, { ...(Shelf.read(KEYS) || {}), discord: k, updated: new Date().toISOString() });
+  Shelf.patch(KEYS, [{ keys: ["discord"], value: k }, { keys: ["updated"], value: new Date().toISOString() }]);
   $("dcIn").value = ""; $("dcMsg").textContent = "保存しました。数分のうちに Discord に試しの1通が届きます"; dcShow();
 };
 $("dcDel").onclick = () => {
   if (!confirm("Discord へのお知らせを止めますか？（ウェブフックの URL を消します）")) return;
-  const d = { ...(Shelf.read(KEYS) || {}) }; delete d.discord; d.updated = new Date().toISOString();
-  Shelf.writeDoc(KEYS, d); $("dcMsg").textContent = "止めました"; dcShow();
+  Shelf.patch(KEYS, [{ keys: ["discord"], del: 1 }, { keys: ["updated"], value: new Date().toISOString() }]); $("dcMsg").textContent = "止めました"; dcShow();
+};
+$("keyClear").onclick = async () => {
+  if (!Shelf.token()) { $("keyMsg").textContent = "この端末には鍵がありません"; return; }
+  if (Shelf.status().pending) {
+    $("keyMsg").textContent = "送っていない変更を送っています…";
+    await Shelf.flush();
+    if (Shelf.status().pending && !confirm(`送れていない変更が ${Shelf.status().pending}件あります。鍵を消すとこの変更は送れなくなります。消しますか？`)) { $("keyMsg").textContent = ""; return; }
+  }
+  if (!confirm("この端末から鍵と記録の写しを消しますか？")) return;
+  await Shelf.clearToken(true); $("keyMsg").textContent = "消しました。この端末からは記録を読み書きできません";
 };
 $("tmdbSave").onclick = async () => {
   const k = $("tmdbIn").value.trim(); if (!k) { $("tmdbMsg").textContent = "鍵を入れてください"; return; }
   $("tmdbMsg").textContent = "TMDB に確かめています…";
   let ok = false; try { ok = await tmdbCheck(k); } catch (_) {}
   if (!ok) { $("tmdbMsg").textContent = "この鍵では TMDB を使えませんでした。コピーした範囲を確かめてください"; return; }
-  Shelf.writeDoc(KEYS, { ...(Shelf.read(KEYS) || {}), tmdb: k, tmdbType: k.length > 60 ? "token" : "key", updated: new Date().toISOString() });
+  Shelf.patch(KEYS, [{ keys: ["tmdb"], value: k }, { keys: ["tmdbType"], value: k.length > 60 ? "token" : "key" }, { keys: ["updated"], value: new Date().toISOString() }]);
   $("tmdbIn").value = ""; $("tmdbMsg").textContent = "保存しました"; tmdbShow();
 };
 
 (async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); $("notices").innerHTML = `<p class="small muted">鍵を設定すると表示されます。</p>`; return; }
-  await Shelf.init({ need: ["records/keys.json", "records/library/", "records/queue.json", "records/reading.json", "records/settings.json", "records/novels-checker/books.json", "records/novels-checker/log", "works/novels.json", "works/films.json", "works/adaptations.json", "records/discs.json", ...Tickets.paths, "records/sns/links.json", "records/notify.json"] });
+  await Shelf.init({ need: ["records/keys.json", "records/library/", "records/queue.json", "records/reading.json", "records/settings.json", "records/novels-checker/books.json", "records/novels-checker/log", "works/novels.json", "works/films.json", "works/adaptations.json", "records/discs.json", ...Tickets.paths, "records/sns/links.json", ...[0, 1].map(d => "records/sns/posts-" + (new Date().getFullYear() - d) + ".json"), "records/notify.json"] });
   const ready = () => { const n = Shelf.read(Lib.P.novels), f = Shelf.read(Lib.P.films); if (n) Biblio.setNovels(n); if (f) Biblio.setFilms(f); };
   ready(); Shelf.on(Lib.P.novels, ready); Shelf.on(Lib.P.films, ready);
   Lib.reconcile();
@@ -186,7 +207,8 @@ async function onCode(code) {
   if (c.kind === "label") { Scan.beep("warn"); show(`<div class="result warn"><div class="big">場所ラベル</div><p>${esc(Lib.places()[c.code] || "未登録のラベル")}</p></div>`); return; }
   if (c.kind === "other" && window.Discs) {
     const d = Discs.byJan(c.code);
-    if (d) { Scan.beep("dup"); show(`<div class="result own"><div class="big">持っています</div><p><b>${esc(Discs.name(d))}</b>（映画のソフト）</p><p class="small">${esc(Discs.text(d) || "保管場所は未設定")}${d.st === "gone" ? `・<span class="pill warn">手放した</span>` : ""}</p></div>`); return; }
+    if (d && d.st === "gone") { Scan.beep("ok"); show(`<div class="result none"><div class="big">持っていません（以前持っていた）</div><p><b>${esc(Discs.name(d))}</b>（映画のソフト）</p><p class="small"><span class="pill warn">手放した</span> ${esc(Discs.text(d) || "")}</p></div>`); return; }
+    if (d) { Scan.beep("dup"); show(`<div class="result own"><div class="big">持っています</div><p><b>${esc(Discs.name(d))}</b>（映画のソフト）</p><p class="small">${esc(Discs.text(d) || "保管場所は未設定")}</p></div>`); return; }
     Scan.beep("warn"); show(`<div class="result warn"><div class="big">登録していないバーコードです</div><p>本ではありません。映画のDVD・Blu-rayなら、蔵書の「登録」画面で読むと作品を選んで登録できます。</p><p class="mono small">${esc(code)}</p></div>`); return;
   }
   if (c.kind === "bad" || c.kind === "other") { Scan.beep("ng"); show(`<div class="result warn"><div class="big">本のバーコードではありません</div><p class="mono small">${esc(code)}</p></div>`); return; }
@@ -203,13 +225,36 @@ async function onCode(code) {
     const read = vm ? (vm[r.vol]?.read ? "読了" : "未読") : (Lib.isRead(it) ? "読了" : "未読");
     const media = vm?.[r.vol]?.media || it.media;
     show(`<div class="result own"><div class="big">持っています</div><p><b>${esc(it.t)}</b> ${esc(vol)}</p>
-      <p class="small">${esc(it.loc || "保管場所は未設定")}・${esc(mediaName(media))}・${read}${it.st !== "own" ? `・<span class="pill warn">${it.st === "gone" ? "手放した" : "所有を外した"}</span>` : ""}${r.byTitle ? `・<span class="small muted">書名で照合</span>` : ""}</p></div>`);
+      <p class="small">${esc(it.loc || "保管場所は未設定")}・${esc(mediaName(media))}・${read}${r.byTitle ? `・<span class="small muted">書名で照合</span>` : ""}</p></div>`);
+    return;
+  }
+  // 電波が無いなどで書誌が取れず、書名での照合ができなかった：「持っていません」とは言い切らない
+  if (r.offline) {
+    Scan.beep("unk");
+    show(`<div class="result warn"><div class="big">ISBNでは見つかりません</div>
+      <p><b>書名での照合ができていません</b>（${navigator.onLine ? "書誌サービスが応答しません" : "電波なし"}）。ISBNの無い記録で持っているかもしれません。</p>
+      <p class="mono small">${esc(c.code)}</p>
+      <div class="row"><input type="text" id="ttlIn" class="grow" placeholder="書名を入れて確かめる（著者は空白のあとに）" aria-label="書名"><button type="button" id="ttlBtn">確かめる</button></div>
+      <div id="ttlOut" aria-live="polite"></div></div>`);
+    const go = () => {
+      const v = $("ttlIn").value.trim(); if (!v) return;
+      const m = v.match(/^(.*?)(?:\s{1,}|　)([^\s　]+)$/);
+      let out = Lib.checkTitle(v, "");
+      if (m && !out.owned.length && !out.series.length) { const o2 = Lib.checkTitle(m[1], m[2]); if (o2.owned.length || o2.series.length) out = o2; }
+      $("ttlOut").innerHTML = titleResult(out);
+    };
+    $("ttlBtn").onclick = go; $("ttlIn").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); go(); } };
     return;
   }
   Scan.beep("ok");
-  if (c.kind === "magazine") { show(`<div class="result none"><div class="big">持っていません</div><p>雑誌コード ${esc(c.mag)}・${c.month}月号</p></div>`); return; }
+  if (c.kind === "magazine") { show(`<div class="result none"><div class="big">持っていません${r.former ? "（以前持っていた）" : ""}</div><p>雑誌コード ${esc(c.mag)}・${c.month}月号</p></div>`); return; }
   const b = r.bib;
   const extra = [];
+  if (r.former) {
+    const f = r.former, fe = r.fm ? f.fm?.find(e => e.k === r.fm) : null;
+    const where = r.formerVol != null ? `${r.formerEd ? r.formerEd + " " : ""}${r.formerVol}巻` : fe ? `${Lib.fmName(fe)}${r.part ? " " + r.part : ""}` : "";
+    extra.push(`<p><span class="pill warn">${f.st === "gone" ? "手放した" : "所有を外した"}</span> 『${esc(f.t)}』${where ? `（${esc(where)}）` : ""}は以前持っていました${f.loc ? `（最後の保管場所：${esc(f.loc)}）` : ""}。今は持っていません。${r.byTitle ? `<span class="small muted">書名で照合</span>` : ""}</p>`);
+  }
   if (r.otherEd) extra.push(`<p><span class="pill warn">別の版を所有</span> 『${esc(r.otherEd.t)}』の別の版を持っています：${esc(Lib.fmSummary(r.otherEd))}${r.otherEd.loc ? `（${esc(r.otherEd.loc)}）` : ""}。この版（${esc((r.otherEd.fm.find(e => e.k === r.fmK) ? Lib.fmName(r.otherEd.fm.find(e => e.k === r.fmK)) : "") + (r.part ? " " + r.part : ""))}）には印がありません。</p>`);
   if (r.wantItem) extra.push(`<p><span class="pill acc">読みたい（未所持）</span> 読みたい本に入っています${r.wantItem.wl ? `（${esc(r.wantItem.wl)}）` : ""}</p>`);
   if (r.series) {
@@ -220,8 +265,8 @@ async function onCode(code) {
   if (r.sameTitle?.length) extra.push(`<p><span class="pill warn">同じ書名の本を所持</span> 別の版かもしれません（${esc(r.sameTitle.map(x => x.pub || x.fmt || "版不明").join("、"))}）</p>`);
   if (r.work) extra.push(`<p><span class="pill acc">必読書</span> ${esc(Biblio.tierNm(r.work.sc))}（スコア${Math.round(r.work.sc)}）${r.workRead ? "・読了済み" : ""}</p>`);
   if (r.films?.length) extra.push(`<p><span class="pill acc">映画化あり</span> ${r.films.slice(0, 3).map(f => esc(`『${f.t}』(${f.y})`)).join("、")}</p>`);
-  show(`<div class="result none"><div class="big">持っていません</div>
-    ${b ? `<p><b>${esc(b.t)}</b></p><p class="small">${esc(b.a)}・${esc(b.pub)}${b.y ? "・" + b.y : ""}</p>` : `<p>書誌が見つかりませんでした（${esc(c.code)}）</p>`}
+  show(`<div class="result none"><div class="big">持っていません${r.former ? "（以前持っていた）" : ""}</div>
+    ${b ? `<p><b>${esc(b.t)}</b></p><p class="small">${esc(b.a)}・${esc(b.pub)}${b.y ? "・" + b.y : ""}${b.cached ? `・<span class="muted">端末の控えの書誌</span>` : ""}</p>` : r.former ? `<p class="mono small">${esc(c.code)}</p>` : `<p>書誌が見つかりませんでした（${esc(c.code)}）</p>`}
     ${extra.join("")}
     <div class="row"><button type="button" id="regNow">この本を登録する</button></div></div>`);
   $("regNow").onclick = async () => {
@@ -231,6 +276,20 @@ async function onCode(code) {
   };
 }
 function show(html) { $("result").innerHTML = html; }
+// 書名で確かめた結果（電波なしのとき）
+function titleResult(o) {
+  if (!o) return "";
+  const rows = [];
+  for (const it of o.owned.slice(0, 5)) rows.push(`<p><span class="pill ok">持っています</span> <b>${esc(it.t)}</b> ${esc(it.a || "")}・${esc(it.loc || "保管場所は未設定")}</p>`);
+  for (const x of o.series.slice(0, 3)) {
+    const vm = x.item.vols || {}; const v = x.vol != null ? vm[x.vol] : null;
+    const owned = Object.entries(vm).filter(([, y]) => y.own).map(([n]) => +n).sort((a, b) => a - b);
+    rows.push(`<p><span class="pill ${v?.own && x.item.st === "own" ? "ok" : ""}">シリーズ</span> 『${esc(x.item.t)}』${owned.length}冊所持（${esc(rangeText(owned))}）${x.vol != null ? `。${x.vol}巻は${v?.own && x.item.st === "own" ? "<b>持っています</b>" : "持っていません"}` : ""}</p>`);
+  }
+  for (const it of o.former.slice(0, 3)) rows.push(`<p><span class="pill warn">${it.st === "gone" ? "手放した" : "所有を外した"}</span> <b>${esc(it.t)}</b> は以前持っていました</p>`);
+  for (const it of o.want.slice(0, 3)) rows.push(`<p><span class="pill acc">読みたい（未所持）</span> <b>${esc(it.t)}</b></p>`);
+  return rows.join("") || `<p>この書名の記録は見つかりませんでした（持っていない可能性が高いですが、書名の書き方が違うこともあります）。</p>`;
+}
 function rangeText(nums) {
   if (!nums.length) return "なし";
   const out = []; let s = nums[0], p = nums[0];

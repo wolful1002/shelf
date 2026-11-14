@@ -31,7 +31,30 @@
     cache = m; return m;
   };
   L.get = id => L.items()[id] || null;
+  // 記録の中のISBN（版の一覧・シリーズの巻を含む）
+  L.isbnsOf = it => {
+    const out = new Set(); if (!it) return out;
+    if (it.isbn) out.add(it.isbn);
+    for (const e of it.fm || []) for (const p of e.parts || []) if (p.isbn) out.add(p.isbn);
+    for (const a of it.alt || []) if (a.isbn) out.add(a.isbn);
+    for (const [, m] of L.volMaps(it)) for (const v of Object.values(m)) if (v.isbn) out.add(v.isbn);
+    return out;
+  };
+  let noDupCheck = 0;
+  // 記録にISBNが新しく入ったとき、同じISBNの所有の記録がほかにあれば、確認待ち「同じ本かどうか」に出す（あとから書誌が埋まって重複に気づかないことを防ぐ）
+  function dupCheck(item) {
+    if (noDupCheck || item.st !== "own" || !L.items()[item.id]) return;   // 新しい記録は登録の時点でISBNを照合済み
+    const before = L.isbnsOf(L.items()[item.id]);
+    const added = [...L.isbnsOf(item)].filter(i => !before.has(i));
+    if (!added.length) return;
+    const others = new Set();
+    for (const x of Object.values(L.items())) if (x.id !== item.id && x.st === "own" && added.some(i => L.isbnsOf(x).has(i))) others.add(x.id);
+    if (!others.size) return;
+    if (Object.values(L.queue()).some(q => q.type === "same" && (q.target === item.id || (q.cands || []).includes(item.id)) && [...others].every(o => q.target === o || (q.cands || []).includes(o)))) return;
+    L.qAdd("same", item.id, { why: `同じISBN（${added.join("、")}）の記録がほかにもあります。同じ本ならまとめてください`, cands: [...others], isbn: added[0] });
+  }
   L.put = item => {
+    try { dupCheck(item); } catch (e) { console.warn(e); }
     item.u = now();
     if (B) { B.items[item.id] = item; L.items()[item.id] = item; L._indexPut(item); return item; }
     Shelf.writeItem(shardPath(item.id), item.id, item); cache = null; return item;
@@ -40,23 +63,22 @@
     if (B) { B.items[id] = null; delete L.items()[id]; return; }
     Shelf.writeItem(shardPath(id), id, null); cache = null;
   };
-  L.batchBegin = () => { B = { items: {}, queue: clone(Shelf.read(P.queue)?.items || {}), ndoc: null, reading: null }; cache = null; };
+  L.batchBegin = () => { B = { items: {}, queue: clone(Shelf.read(P.queue)?.items || {}), queue0: clone(Shelf.read(P.queue)?.items || {}), ndoc: null, ndoc0: null, reading: null, reading0: null }; cache = null; };
   L.batchActive = () => !!B;
   L.batchDiscard = () => { B = null; cache = null; };
   L.batchChanges = () => B ? { items: { ...B.items }, queue: B.queue, ndoc: B.ndoc, reading: B.reading } : null;
+  // 下書きを送る。ファイル丸ごとではなく、変えた記録1件ずつ（必読書の記録は変えた印だけ）を積む。
+  // 送るときはファイルごとに1回にまとまるので送信の回数は増えず、ほかの端末や定期タスクが同じファイルに書いた変更も消さない
+  const diffItems = (a, b) => { const m = {}; for (const k of new Set([...Object.keys(a || {}), ...Object.keys(b || {})])) { const x = a?.[k], y = b?.[k]; if (JSON.stringify(x) !== JSON.stringify(y)) m[k] = y === undefined ? null : y; } return m; };
   L.batchCommit = () => {
     if (!B) return 0;
     const byShard = {};
     for (const [id, v] of Object.entries(B.items)) (byShard[shardPath(id)] = byShard[shardPath(id)] || {})[id] = v;
     let files = 0;
-    for (const [path, ch] of Object.entries(byShard)) {
-      const d = clone(Shelf.read(path)) || { items: {} }; d.items = d.items || {};
-      for (const [id, v] of Object.entries(ch)) { if (v === null) delete d.items[id]; else d.items[id] = v; }
-      Shelf.writeDoc(path, d); files++;
-    }
-    if (JSON.stringify(B.queue) !== JSON.stringify(Shelf.read(P.queue)?.items || {})) { Shelf.writeDoc(P.queue, { items: B.queue }); files++; }
-    if (B.ndoc) { Shelf.writeDoc(P.novelDoc, B.ndoc); files++; }
-    if (B.reading) { Shelf.writeDoc(P.reading, { items: B.reading }); files++; }
+    for (const [path, ch] of Object.entries(byShard)) { Shelf.writeItems(path, ch); files++; }
+    const qd = diffItems(B.queue0, B.queue); if (Object.keys(qd).length) { Shelf.writeItems(P.queue, qd); files++; }
+    if (B.ndoc) { Shelf.writeDoc(P.novelDoc, B.ndoc, B.ndoc0 || {}); files++; }
+    if (B.reading) { const rd = diffItems(B.reading0, B.reading); if (Object.keys(rd).length) { Shelf.writeItems(P.reading, rd); files++; } }
     B = null; cache = null;
     return files;
   };
@@ -143,15 +165,19 @@
     const parts = e.parts.length > 1 || e.parts[0]?.v ? `（${e.parts.map(p => (p.v || "本") + (p.own ? "✓" : "")).join("・")}）` : own.length ? "✓" : "";
     return name + parts;
   }).join("／");
+  // ISBNで記録を探す。返り値の own：その版・巻・記録を今も持っているか（手放した本・所有を外した本・印の無い巻は false）
   L.byIsbn = isbn => {
+    const live = it => it.st === "own";
     for (const it of Object.values(L.items())) {
-      if (it.fm) for (const e of it.fm) for (const p of e.parts) if (p.isbn === isbn) return { item: it, fm: e.k, part: p.v, partOwn: !!p.own };
-      if (it.isbn === isbn) return { item: it };
-      if (it.alt && it.alt.some(a => a.isbn === isbn)) return { item: it, alt: true };
-      for (const [ed, m] of L.volMaps(it)) for (const [n, v] of Object.entries(m)) if (v.isbn === isbn) return { item: it, vol: it.issues ? n : +n, ed };
+      if (it.fm) for (const e of it.fm) for (const p of e.parts) if (p.isbn === isbn) return { item: it, fm: e.k, part: p.v, partOwn: !!p.own, own: live(it) && !!p.own };
+      if (it.isbn === isbn) return { item: it, own: live(it) };
+      if (it.alt && it.alt.some(a => a.isbn === isbn)) return { item: it, alt: true, own: live(it) };
+      for (const [ed, m] of L.volMaps(it)) for (const [n, v] of Object.entries(m)) if (v.isbn === isbn) return { item: it, vol: it.issues ? n : +n, ed, volOwn: !!v.own, own: live(it) && !!v.own };
     }
     return null;
   };
+  // このISBNの本を今持っているか（所持確認・ためて登録で「所持済み」とするか）
+  L.ownsIsbn = isbn => !!L.byIsbn(isbn)?.own;
   L.byAsin = asin => {
     if (!asin) return null;
     for (const it of Object.values(L.items())) {
@@ -165,7 +191,8 @@
   // 同じ本かどうかを見るための書名の鍵。チェッカーとの照合（normTitle）と違い、上・中・下や巻数は残す（別の本なので）。
   // 末尾のレーベル（(ハヤカワ文庫SF) など）と、新装版などの版の言葉は外す
   L.sameKey = t => {
-    let s = String(t || "").normalize("NFKC").replace(/〈([^〉]*)〉|<([^>]*)>|＜([^＞]*)＞/g, " $1$2$3 ").replace(/\[[^\]]*\]|【[^】]*】/g, " ");
+    // 「言語化するための小説思考 = How to put …」のような、= の後ろの欧文の並列書名は外す
+    let s = String(t || "").normalize("NFKC").replace(/\s+=\s.*$/, "").replace(/〈([^〉]*)〉|<([^>]*)>|＜([^＞]*)＞/g, " $1$2$3 ").replace(/\[[^\]]*\]|【[^】]*】/g, " ");
     for (let i = 0; i < 4; i++) { const b = s; s = s.replace(/\s*\(([^()]*)\)\s*$/, (m, x) => /^\s*(第?\d{1,3}巻?|上|中|下|前編|後編|上巻|下巻)\s*$/.test(x) ? m : "").trim(); if (s === b) break; }
     return Biblio.norm(s.replace(/新装改訂版|新装版|新訳版?|完全版|決定版|改訂版|増補版|増補改訂版/g, ""));
   };
@@ -377,7 +404,7 @@
   function writeNdoc(fn) {
     const d = clone(L.ndoc()); d.read = d.read || {}; d.want = d.want || {}; d.own = d.own || {};
     fn(d); d.updated = now();
-    if (B) { B.ndoc = d; return; }
+    if (B) { if (!B.ndoc0) B.ndoc0 = clone(Shelf.read(P.novelDoc) || {}); B.ndoc = d; return; }
     Shelf.writeDoc(P.novelDoc, d);
   }
   L.setOwn = (k, on) => writeNdoc(d => { if (on) d.own[k] = 1; else delete d.own[k]; });
@@ -387,11 +414,12 @@
   // ---------- 読書の状況（チェッカーに結び付かない本） ----------
   L.reading = () => (B && B.reading) || Shelf.read(P.reading)?.items || {};
   L.setReading = (key, val) => {
-    if (B) { B.reading = B.reading || clone(Shelf.read(P.reading)?.items || {}); if (val) B.reading[key] = { ...val, u: now() }; else delete B.reading[key]; return; }
+    if (B) { if (!B.reading) { B.reading0 = clone(Shelf.read(P.reading)?.items || {}); B.reading = clone(B.reading0); } if (val) B.reading[key] = { ...val, u: now() }; else delete B.reading[key]; return; }
     Shelf.writeItem(P.reading, key, val ? { ...val, u: now() } : null);
   };
   L.isRead = it => {
-    if (it.kind === "series") { const v = Object.values(it.vols || {}); return v.length > 0 && v.filter(x => x.own).every(x => x.read); }
+    // 持っている巻がすべて読了なら読了。持っている巻が1つも無ければ未読（修正指示書 C）
+    if (it.kind === "series") { const own = Object.values(it.vols || {}).filter(x => x.own); return own.length > 0 && own.every(x => x.read); }
     if (it.nk) return !!L.ndoc().read[it.nk];
     return L.reading()["b:" + it.id]?.s === "read";
   };
@@ -400,8 +428,53 @@
     return L.reading()["b:" + it.id]?.d || "";
   };
   L.setRead = (it, on, date) => {
+    if (on && it.nk && L.reading()["n:" + it.nk]?.s === "now") L.setReading("n:" + it.nk, null);   // 読了にしたら読書中を外す
     if (it.nk) L.setNovelRead(it.nk, on ? (date || 1) : null);
     else L.setReading("b:" + it.id, on ? { s: "read", d: date || undefined, via: "manual", n: 1 } : null);
+  };
+  // ---------- 読書中（修正指示書 C-3・要件 3章） ----------
+  // records/reading.json に「読書中」を持つ。必読書と結び付いた本は "n:作品キー"、それ以外は "b:記録の番号"（読了と同じ鍵）。値は {s:"now", d:読み始めた日}。
+  // 読了にすると読書中は外れる（チェッカーの記録 books.json の形は変えない：チェッカーの画面が丸ごと書いても消えないように）
+  const nowKey = it => it.nk ? "n:" + it.nk : "b:" + it.id;
+  L.isReading = it => !!it && it.kind !== "series" && L.reading()[nowKey(it)]?.s === "now" && !L.isRead(it);
+  L.readingSince = it => L.isReading(it) ? (L.reading()[nowKey(it)].d || "") : "";
+  L.setReadingNow = (it, on, date) => {
+    if (on) L.setReading(nowKey(it), { s: "now", d: date || undefined, via: "manual" });
+    else if (L.reading()[nowKey(it)]?.s === "now") L.setReading(nowKey(it), null);
+  };
+  L.readingList = () => Object.values(L.items()).filter(it => it.st !== "want" && L.isReading(it));
+  // ---------- 次に読む巻（修正指示書 C-1・C-2・要件 7章） ----------
+  // 巻だけのシリーズ（漫画など）：1巻から順に見て、最初の読んでいない巻。持っていなければ own:false（「未所持」）
+  L.nextVol = it => {
+    if (!it || it.kind !== "series" || it.issues) return null;
+    const m = it.vols || {}, nums = Object.keys(m).map(Number).filter(n => n > 0);
+    const max = Math.max(it.total || 0, ...nums, 0);
+    for (let n = 1; n <= max; n++) if (!m[n]?.read) return { vol: n, own: !!m[n]?.own };
+    return null;
+  };
+  // 副題の付いた巻のシリーズ（sr）：同じシリーズ名・同じ著者の本を順番に並べ、最初の読んでいない本
+  L.srNext = it => {
+    if (!it?.sr) return null;
+    const key = L.srKey(it.sr);
+    const mem = [it, ...L.seriesMembers(key, it.a, it.id)]
+      .sort((a, b) => (parseFloat(a.sv) || 999) - (parseFloat(b.sv) || 999) || String(a.t).localeCompare(String(b.t)));
+    const nx = mem.find(x => !L.isRead(x));
+    return nx ? { item: nx, own: nx.st === "own", name: it.sr, started: mem.some(x => L.isRead(x)) } : null;
+  };
+  // 読みかけのシリーズ（どれか1巻でも読了がある）の次の巻。今日の1冊の候補に使う
+  L.nextReads = () => {
+    const out = [], seen = new Set();
+    for (const it of Object.values(L.items())) {
+      if (it.st !== "own") continue;
+      if (it.kind === "series") {
+        if (it.issues || !Object.values(it.vols || {}).some(v => v.read)) continue;
+        const n = L.nextVol(it); if (n) out.push({ kind: "vol", item: it, vol: n.vol, own: n.own, t: `${it.t} ${n.vol}巻` });
+      } else if (it.sr) {
+        const k = L.srKey(it.sr) + "|" + Biblio.norm(it.a); if (seen.has(k)) continue; seen.add(k);
+        const n = L.srNext(it); if (n && n.started) out.push({ kind: "sr", item: n.item, own: n.own, t: n.item.t, name: n.name });
+      }
+    }
+    return out;
   };
   L.isUnreadOwned = it => it.st === "own" && !L.isRead(it);
   // 所有している冊数（シリーズは持っている巻の数）と、うち積読の冊数。画面の見出しの数字に使う
@@ -428,14 +501,26 @@
   // ---------- 保管場所 ----------
   L.settings = () => Shelf.read(P.settings) || { places: {}, nextLabel: 1 };
   L.places = () => L.settings().places || {};
+  // 保管場所は「その場所だけ」を書く。2台で同時に足して番号がぶつかったときは、送るときに次の空いた番号にずらす（modes.label）
   L.addPlace = name => {
-    const s = clone(L.settings()); s.places = s.places || {}; s.nextLabel = s.nextLabel || 1;
-    const existing = Object.entries(s.places).find(([, n]) => n === name); if (existing) return existing[0];
-    const code = Biblio.withCheck(Biblio.LABEL_PREFIX + String(s.nextLabel).padStart(10, "0"));
-    s.places[code] = name; s.nextLabel++; Shelf.writeDoc(P.settings, s); return code;
+    const s = L.settings(); const places = s.places || {};
+    const existing = Object.entries(places).find(([, n]) => n === name); if (existing) return existing[0];
+    let n = s.nextLabel || 1, code;
+    for (;;) { code = Biblio.withCheck(Biblio.LABEL_PREFIX + String(n).padStart(10, "0")); if (!places[code]) break; n++; }
+    Shelf.patch(P.settings, [{ keys: ["places", code], value: name, mode: "label" }, { keys: ["nextLabel"], value: n + 1, mode: "max" }]);
+    return code;
   };
-  L.renamePlace = (code, name) => { const s = clone(L.settings()); s.places[code] = name; Shelf.writeDoc(P.settings, s); };
-  L.removePlace = code => { const s = clone(L.settings()); delete s.places[code]; Shelf.writeDoc(P.settings, s); };
+  L.renamePlace = (code, name) => Shelf.patch(P.settings, [{ keys: ["places", code], value: name }]);
+  L.removePlace = code => Shelf.patch(P.settings, [{ keys: ["places", code], del: 1 }]);
+  // 設定の一部を書き換える（fn は設定の写しを直す。変えた所だけを送る）
+  L.editSettings = fn => { const base = clone(L.settings()); const s = clone(base); fn(s); Shelf.writeDoc(P.settings, s, base); };
+  Shelf.patchMode("label", (places, code, name, root) => {
+    if (Object.values(places).includes(name)) return;   // 同じ名前の場所がもうある（ほかの端末が先に足した）
+    if (!places[code]) { places[code] = name; return; }
+    let n = Math.max(root.nextLabel || 1, 1), c;
+    for (;;) { c = Biblio.withCheck(Biblio.LABEL_PREFIX + String(n).padStart(10, "0")); if (!places[c]) break; n++; }
+    places[c] = name; root.nextLabel = n + 1;
+  });
 
   // ---------- 状態の変更（チェッカーの所有と揃える） ----------
   L.setStatus = (it, st) => {
@@ -450,7 +535,8 @@
     if (k) { it.nk = k; it.link = "manual"; } else { delete it.nk; it.link = "none"; }
     L.put(it);
     // チェッカーに結び付く前に付けた読了（ブクログからの登録など）は、チェッカーの読了に移す
-    if (k) { const r = L.reading()["b:" + it.id]; if (r?.s === "read" && !L.ndoc().read[k]) L.setNovelRead(k, r.d || 1); }
+    // 移したあとは蔵書の側の読了を消す（両方に残すと、読了が二重に数えられる。修正指示書 C-10）
+    if (k) { const r = L.reading()["b:" + it.id]; if (r?.s === "read") { if (!L.ndoc().read[k]) L.setNovelRead(k, r.d || 1); L.setReading("b:" + it.id, null); } }
     if (old && old !== k) L.setOwn(old, false);
     if (k && it.st === "own") L.setOwn(k, true);
     L.qDelFor(it.id);
@@ -509,7 +595,10 @@
         if (inp.media && v.media && v.media !== inp.media) v.media = "both"; else if (inp.media && !v.media) v.media = inp.media;
       }
       if (x) { L.put(x); if (x.nk && x.st === "own" && hit.item.st !== "own") { L.setOwn(x.nk, true); L.qDelFor(x.id); } }
-      return { status: hit.vol != null ? "voldup" : hit.fm && !hit.partOwn && !want ? "alt" : "dup", item: x || hit.item, vol: hit.vol, ed: hit.ed, filled: !!x };
+      // revived：手放した・所有を外した本を、読んだので所有に戻した。volAdded：記録はあったが印の無かった巻に印を付けた
+      const revived = !want && (hit.item.st === "off" || hit.item.st === "gone") ? hit.item.st : undefined;
+      const volAdded = hit.vol != null && !want && !hit.volOwn;
+      return { status: hit.vol != null ? (volAdded ? "vol" : "voldup") : hit.fm && !hit.partOwn && !want ? "alt" : "dup", item: x || hit.item, vol: hit.vol, ed: hit.ed, filled: !!x, revived, volAdded };
     }
     if (inp.mag && !inp.issue) { const h = L.byMag(inp.mag, inp.magMonth); if (h) { const x = L.absorb(h, inp); if (x) L.put(x); return { status: "dup", item: x || h }; } }
     const ccode = inp.ccode || bib?.ccode || "";
@@ -647,7 +736,8 @@
   };
 
   // 2つの記録を1つにまとめる（from の情報で into の空いた項目を埋め、from は消す）
-  L.mergeInto = (into, from) => {
+  L.mergeInto = (into, from) => { noDupCheck++; try { return mergeInto0(into, from); } finally { noDupCheck--; } };
+  const mergeInto0 = (into, from) => {
     const fp = L.splitPart(from.t).part, ip = L.splitPart(into.t).part;
     // 紙と電子の違いも版の違いとして分ける。書名と著者しか分からない記録（版の手がかりが無い）は、版を増やさずに書名へまとめる
     const fromInfo = !!(from.isbn || from.asin || from.fmt || from.label || from.media === "ebook" || fp);
@@ -681,17 +771,118 @@
     return x;
   };
 
+  // 1冊の本の記録を、シリーズの巻にまとめる（同じISBNの本とシリーズの巻）。本の読了・購入の記録・ブクログとの結び付きを巻とシリーズに移し、本の記録は消す
+  L.mergeBookIntoVol = (series, book, vol, ed) => { noDupCheck++; try { return mergeVol0(series, book, vol, ed); } finally { noDupCheck--; } };
+  const mergeVol0 = (series, book, vol, ed) => {
+    const s = clone(series);
+    const m = ed ? (s.eds[ed].vols) : (s.vols = s.vols || {});
+    const v = m[vol] = m[vol] || {};
+    if (book.st === "own") v.own = 1;
+    for (const k of ["isbn", "asin"]) if (book[k] && !v[k]) v[k] = book[k];
+    if (book.media) v.media = v.media && v.media !== book.media ? "both" : book.media;
+    const r = book.nk ? L.ndoc().read[book.nk] : L.reading()["b:" + book.id];
+    const rd = book.nk ? r : r?.s === "read" ? (r.d || 1) : null;
+    if (rd && !v.read) v.read = rd;
+    for (const b of book.buy || []) { s.buy = s.buy || []; if (!s.buy.some(y => y.shop === b.shop && y.d === b.d && y.v === String(vol))) s.buy.push({ ...b, v: String(vol), ...(ed ? { ed } : {}) }); }
+    const blks = [...new Set([...(s.blks || []), book.blk, ...(book.blks || [])].filter(Boolean))].filter(b => b !== s.blk); if (blks.length) s.blks = blks;
+    const keys = [...new Set([...(s.blkKeys || []), book.blkKey, ...(book.blkKeys || [])].filter(Boolean))].filter(b => b !== s.blkKey); if (keys.length) s.blkKeys = keys;
+    if (book.loc && !s.loc) s.loc = book.loc;
+    if (book.note) v.note = [v.note, book.note].filter(Boolean).join("／");
+    if (s.st !== "own" && book.st === "own") s.st = "own";
+    L.put(s);
+    if (!book.nk && r) L.setReading("b:" + book.id, null);
+    L.qDelFor(book.id); L.remove(book.id);
+    return s;
+  };
+  // 2つの記録をまとめる（確認待ち「同じ本かどうか」の答えなど）。片方がシリーズなら、本をその巻に入れる
+  L.mergeSame = (into, from) => {
+    if (into.kind === "series" && from.kind !== "series") {
+      const isb = [...L.isbnsOf(from)];
+      for (const [ed, m] of L.volMaps(into)) for (const [n, v] of Object.entries(m)) if (v.isbn && isb.includes(v.isbn)) return L.mergeBookIntoVol(into, from, into.issues ? n : +n, ed || undefined);
+      return null;   // 巻が決まらない：まとめない
+    }
+    if (from.kind === "series" && into.kind !== "series") return L.mergeSame(from, into);
+    if (into.kind === "series" || from.kind === "series") return null;
+    return L.mergeInto(into, from);
+  };
+  // ---------- 同じISBNの記録（2026-11-14 の点検で195組見つかった重複） ----------
+  // 所有している記録どうしで、同じISBNを持つ組を集める。返り値：[{isbns:[…], ids:[…]}]（3件以上つながるものは1組）
+  L.sameIsbnGroups = () => {
+    const by = new Map();
+    for (const it of Object.values(L.items())) if (it.st === "own") for (const i of L.isbnsOf(it)) { if (!by.has(i)) by.set(i, new Set()); by.get(i).add(it.id); }
+    // 本どうしはつなげて1組にする（3件以上の重なり）。シリーズは巻ごとに別の本と重なるので、シリーズを介してはつなげない
+    const parent = new Map(), find = x => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+    const isSer = id => L.get(id)?.kind === "series";
+    const multi = [...by].filter(([, set]) => set.size >= 2);
+    for (const [, set] of multi) { const bs = [...set].filter(id => !isSer(id)); for (const id of bs) if (!parent.has(id)) parent.set(id, id); for (const id of bs.slice(1)) parent.set(find(id), find(bs[0])); }
+    const groups = new Map();
+    for (const [i, set] of multi) {
+      const bs = [...set].filter(id => !isSer(id)); const key = bs.length ? find(bs[0]) : "s:" + i;
+      if (!groups.has(key)) groups.set(key, { isbns: [], ids: new Set() });
+      const g = groups.get(key); g.isbns.push(i); set.forEach(id => g.ids.add(id));
+    }
+    return [...groups.values()].map(g => ({ isbns: g.isbns.sort(), ids: [...g.ids] }));
+  };
+  // まとめ方を決める。auto：自動でまとめてよい組（into に残す）・ask：確認待ちに出す組（必読書と結び付いた記録を含む、保管場所が両方に入っていて違う、シリーズが2つ以上など）
+  L.planSameIsbn = () => {
+    const plan = { auto: [], ask: [] };
+    const rank = it => (it.kind === "series" ? 100 : 0) + (it.nk ? 50 : 0) + (it.fm ? 20 : 0) + (it.loc ? 10 : 0) + (it.isbn ? 5 : 0) + (it.pub ? 2 : 0) + (it.blk ? 1 : 0);
+    for (const g of L.sameIsbnGroups()) {
+      const its = g.ids.map(L.get).filter(Boolean);
+      const series = its.filter(x => x.kind === "series");
+      const locs = its.filter(x => (x.loc || "").trim());
+      const why = [];
+      if (its.some(x => x.nk)) why.push("必読書と結び付いた記録を含む");
+      if (locs.length >= 2) why.push("保管場所が両方に入っている");
+      if (series.length >= 2) why.push("シリーズの記録が2つ以上");
+      const into = its.slice().sort((a, b) => rank(b) - rank(a) || String(a.added || "").localeCompare(String(b.added || "")))[0];
+      const row = { isbns: g.isbns, into: into.id, from: its.filter(x => x !== into).map(x => x.id), kind: series.length ? "本とシリーズの巻" : "本と本", why };
+      (why.length ? plan.ask : plan.auto).push(row);
+    }
+    return plan;
+  };
+  // 計画どおりにまとめる（auto はまとめ、ask は確認待ちに出す）。返り値：{merged, asked, skipped}
+  L.runSameIsbn = plan => {
+    let merged = 0, asked = 0, skipped = 0;
+    noDupCheck++;
+    try {
+      for (const row of plan.auto) {
+        for (const fid of row.from) {
+          const into = L.get(row.into), from = L.get(fid);
+          if (!into || !from) { skipped++; continue; }
+          const r = L.mergeSame(into, from);
+          if (r) { merged++; if (r.id !== row.into) row.into = r.id; } else { L.qAdd("same", fid, { why: "同じISBNの記録です。シリーズのどの巻か決まらなかったので、同じ本ならまとめてください", cands: [row.into], isbn: row.isbns[0] }); asked++; }
+        }
+      }
+      for (const row of plan.ask) {
+        const ids = [row.into, ...row.from].filter(id => L.get(id));
+        if (ids.length < 2) { skipped++; continue; }
+        if (Object.values(L.queue()).some(q => q.type === "same" && ids.includes(q.target))) continue;
+        L.qAdd("same", row.from[0], { why: `同じISBN（${row.isbns.join("、")}）の記録が${ids.length}件あります（${row.why.join("・")}）。同じ本ならまとめてください`, cands: ids.filter(id => id !== row.from[0]), isbn: row.isbns[0] });
+        asked++;
+      }
+    } finally { noDupCheck--; }
+    return { merged, asked, skipped };
+  };
+
   // 所持確認：登録はせず、持っているかどうかと関連する情報を返す
+  // 返り値：{owned, c, item?, …}。owned が false でも、former（以前持っていた本：手放した・所有を外した）・otherEd（別の版を所有）・wantItem・series などを添える。
+  // offline：書誌が取れず、書名での照合ができなかった（電波なしなど）。このときは「持っていません」と言い切らない
   L.check = async (code) => {
     const c = Biblio.classify(code);
     if (c.kind === "isbn") {
       const hit = L.byIsbn(c.code);
+      const look = async () => { const bib = await Biblio.lookupCached(c.code); return bib; };
       // 読みたい（未所持）の本は「持っていない」として、読みたいに入っていることを添える
-      if (hit && hit.item.st === "want") { const bib = await Biblio.lookup(c.code); return { owned: false, c, bib, wantItem: hit.item, ...extras(bib) }; }
+      if (hit && hit.item.st === "want") { const bib = await look(); return { owned: false, c, bib, wantItem: hit.item, ...extras(bib) }; }
+      // 手放した・所有を外した本は「持っていない（以前持っていた）」
+      if (hit && (hit.item.st === "off" || hit.item.st === "gone")) { const bib = await look(); return { owned: false, c, bib, ...extras(bib), former: hit.item, formerVol: hit.vol, formerEd: hit.ed, fm: hit.fm, part: hit.part }; }
       // 同じ本の別の版としてだけ登録されている（この版には所有の印が無い）
-      if (hit && hit.fm && !hit.partOwn) { const bib = await Biblio.lookup(c.code); return { owned: false, c, bib, otherEd: hit.item, fmK: hit.fm, part: hit.part, ...extras(bib) }; }
+      if (hit && hit.fm && !hit.partOwn) { const bib = await look(); return { owned: false, c, bib, otherEd: hit.item, fmK: hit.fm, part: hit.part, ...extras(bib) }; }
+      // シリーズの巻：その巻に所有の印があるときだけ「持っている」
+      if (hit && hit.vol != null && !hit.volOwn) { const bib = await look(); return { owned: false, c, bib, ...extras(bib), series: hit.item, vol: hit.vol, ed: hit.ed }; }
       if (hit) return { owned: true, c, ...hit };
-      const bib = await Biblio.lookup(c.code);
+      const bib = await look();
       if (bib) {
         // ISBNの無い記録（Kindle・ブクログ・購入履歴など）も、書名と著者で同じ本なら「持っている」とする
         const f = L.findSameByTitle(bib.t, bib.a);
@@ -700,15 +891,38 @@
         const ex = extras(bib);
         if (ex.series && ex.vol != null) {
           const m = ex.ed ? ex.series.eds?.[ex.ed]?.vols : ex.series.vols;
-          if (m?.[ex.vol]?.own) return { owned: true, c, item: ex.series, vol: ex.vol, ed: ex.ed, byTitle: true };
+          if (m?.[ex.vol]?.own && ex.series.st === "own") return { owned: true, c, item: ex.series, vol: ex.vol, ed: ex.ed, byTitle: true };
         }
         if (f?.item && f.item.st === "want") return { owned: false, c, bib, wantItem: f.item, ...ex };
+        if (f?.item && (f.item.st === "off" || f.item.st === "gone")) return { owned: false, c, bib, former: f.item, byTitle: true, ...ex };
         return { owned: false, c, bib, ...ex };
       }
-      return { owned: false, c, bib: null };
+      // 書誌が取れない：ISBNでは見つからないが、書名での照合はできていない（ISBNの無い所有本かもしれない）
+      return { owned: false, c, bib: null, offline: true };
     }
-    if (c.kind === "magazine") { const hit = L.byMag(c.mag, c.month); return { owned: !!hit, c, item: hit }; }
+    if (c.kind === "magazine") { const hit = L.byMag(c.mag, c.month); const own = !!hit && hit.st === "own"; return { owned: own, c, item: hit, former: hit && !own && hit.st !== "want" ? hit : undefined }; }
     return { owned: false, c };
+  };
+  // 書名（と著者）で所持を確かめる（電波が無く書誌が取れないときに、手で書名を入れて確かめる）
+  L.checkTitle = (t, a) => {
+    t = String(t || "").trim(); if (!t) return null;
+    const out = { owned: [], former: [], want: [], series: [] };
+    const k = L.sameKey(t), nt = Biblio.norm(t), na = Biblio.norm(a || "");
+    const sv = Biblio.splitVolume(L.splitEd(t).base, null);
+    for (const it of Object.values(L.items())) {
+      if (it.kind === "series") {
+        const st = Biblio.norm(it.t);
+        const nb = Biblio.norm(sv.base); if (st.length < 2 || !(nt.startsWith(st) || (nb.length >= 2 && st.startsWith(nb)))) continue;
+        out.series.push({ item: it, vol: sv.vol });
+        continue;
+      }
+      const ik = L.sameKey(it.t), ia = Biblio.norm(it.a);
+      const titleHit = ik === k || (nt.length >= 3 && Biblio.norm(it.t).includes(nt));
+      if (!titleHit) continue;
+      if (na && ia && !ia.includes(na) && !na.includes(ia)) continue;
+      (it.st === "own" ? out.owned : it.st === "want" ? out.want : out.former).push(it);
+    }
+    return out;
   };
   // 持っていない本について、所持確認の画面に添える情報
   function extras(bib) {

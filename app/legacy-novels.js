@@ -400,23 +400,35 @@ function rowHTML(b){
         <div class="meta"><button class="lk" data-sort="author" title="著者順に並べる">${esc(b.a)}</button><button class="lk yr" data-sort="year" title="発表年順に並べる（もう一度で年代順）">${yr(b.y)}</button><button class="lk" data-sort="country" title="国順に並べる">${CN[b.c]||b.c}</button>${b.g.map(g=>`<span class="tag gn">${GN[g]}</span>`).join("")}${b.tr===2 ? trLabel(b) + (b.jp ? `<button class="lk pubj" data-sort="publisher" title="出版社順に並べる（初刊の版元 / 現在の主な文庫・版）">${esc(b.jp)}${b.jb?` / ${esc(b.jb)}`:""}</button>` : "") : b.jp ? "" : trLabel(b)}${b.tr===1 && b.jp ? `<span class="tjw">邦訳 <button class="lk tj" data-sort="publisher" title="出版社順に並べる">${esc(b.jp)}</button>${b.jy?`<button class="lk tj" data-sort="tyear" title="邦訳の刊行年順に並べる">・${b.jy}</button>`:""}</span>` : ""}</div>
         <div class="acts"><button class="detb" aria-expanded="${openKey===b.k}">${openKey===b.k?"詳細を閉じる":"詳細"}</button>${r?`<span class="when">${readTxt(b.k)}</span>`:`<button class="wantb" aria-pressed="${w}">${w?"★ 読みたい":"☆ 読みたい"}</button>`}<button class="todayb" title="${r && dOf(read[b.k]) ? "今日の日付で再読を記録" : "今日の日付で読了にする"}">${r && dOf(read[b.k]) ? "今日また読んだ" : "今日読んだ"}</button><a class="amz" href="${amzURL(b)}" target="_blank" rel="noopener" title="Amazonで探す">Amazon</a></div></div>
       <div class="rc"><div class="score${b.sc>=50?" hi":""}"><b>${Math.round(b.sc)}</b>${b.n}/${b.e}リスト</div>
-        <button class="ownb" aria-pressed="${!!own[b.k]}" aria-label="${esc(b.t)} を所有している" title="手元にある本に印を付ける"><span class="ob" aria-hidden="true">${own[b.k]?"■":"□"}</span>所有</button></div>
+        <button class="ownb" aria-pressed="${!!own[b.k]}" aria-label="${esc(b.t)} を所有している" title="手元にある本に印を付ける"><span class="ob" aria-hidden="true">${own[b.k]?"■":"□"}</span>所有${own[b.k] && ownEbookOnly(b.k) ? "<small>（電子）</small>" : ""}</button></div>
       <div class="strip" aria-hidden="true">${strip(b)}</div>
     </div>
     ${openKey===b.k ? detailHTML(b) : ""}
   </li>`;
 }
-// 蔵書との連携：この作品に結び付いた蔵書の記録（版・保管場所）
-function libOf(k){
-  const out = [];
-  for(const h of "0123456789abcdef"){ const d = window.Shelf && Shelf.read("records/library/" + h + ".json"); if(d && d.items) for(const it of Object.values(d.items)) if(it.nk === k && it.st === "own") out.push(it) }
-  return out;
+// 蔵書との連携：この作品に結び付いた蔵書の記録（版・保管場所）。一覧の行ごとに全件を見ると遅いので、作品キーごとの索引を作っておく
+let LIBIX = null;
+if(window.Shelf) Shelf.onAny(p=>{ if(p.startsWith("records/library/")) LIBIX = null });
+function libIndex(){
+  if(LIBIX) return LIBIX;
+  LIBIX = new Map();
+  for(const h of "0123456789abcdef"){ const d = window.Shelf && Shelf.read("records/library/" + h + ".json"); if(d && d.items) for(const it of Object.values(d.items)) if(it.nk && it.st === "own"){ if(!LIBIX.has(it.nk)) LIBIX.set(it.nk, []); LIBIX.get(it.nk).push(it) } }
+  return LIBIX;
+}
+function libOf(k){ return libIndex().get(k) || [] }
+// 電子だけで持っているか（要件 2章：チェッカーでは「所有（電子）」と区別して出す）。版の一覧がある本は、印の付いた版で見る
+function ownEbookOnly(k){
+  const its = libOf(k); if(!its.length) return false;
+  const paper = it => it.fm ? it.fm.some(e => e.media !== "ebook" && e.parts.some(p => p.own)) || !it.fm.some(e => e.parts.some(p => p.own)) && it.media !== "ebook" : it.media !== "ebook";
+  return !its.some(paper);
 }
 function libHTML(b){
   const its = libOf(b.k); if(!its.length) return "";
   const md = m => m === "ebook" ? "電子" : m === "both" ? "紙と電子" : "紙";
   const one = (x, extra) => [x.pub, x.label, x.fmt, x.isbn, md(x.media)].filter(Boolean).join("・") + (extra ? "" : "");
-  return `<div style="font-size:13px;color:var(--muted)">蔵書 <span style="color:var(--ink)">${its.map(it => `${esc(one(it))}${it.loc ? "　保管場所：" + esc(it.loc) : ""}${(it.alt||[]).map(a => `／別の版：${esc([a.pub, a.fmt, a.isbn, md(a.media)].filter(Boolean).join("・"))}${a.loc ? "（" + esc(a.loc) + "）" : ""}`).join("")}`).join("<br>")}</span>　<a href="library.html#list">蔵書を開く</a></div>`;
+  // 版の一覧（fm）がある本は版ごとに、所有の印（✓）と保管場所を出す。前の形の別の版（alt）が残っていればそれも出す
+  const fmTxt = it => (it.fm||[]).map(e => { const nm = [e.fmt || (e.media === "ebook" ? "電子" : ""), e.label && e.label !== e.fmt ? e.label : "", e.pub, e.y ? e.y + "年" : ""].filter(Boolean).join("・") || "版不明"; const ps = e.parts.length > 1 || e.parts[0]?.v ? "（" + e.parts.map(p => (p.v || "本") + (p.own ? "✓" : "")).join("・") + "）" : e.parts[0]?.own ? "✓" : "（未所有）"; return esc(nm + ps) + (e.loc ? "（" + esc(e.loc) + "）" : "") }).join("／");
+  return `<div style="font-size:13px;color:var(--muted)">蔵書${ownEbookOnly(b.k) ? "（電子）" : ""} <span style="color:var(--ink)">${its.map(it => it.fm ? `${fmTxt(it)}${it.loc ? "　保管場所：" + esc(it.loc) : ""}` : `${esc(one(it))}${it.loc ? "　保管場所：" + esc(it.loc) : ""}${(it.alt||[]).map(a => `／別の版：${esc([a.pub, a.fmt, a.isbn, md(a.media)].filter(Boolean).join("・"))}${a.loc ? "（" + esc(a.loc) + "）" : ""}`).join("")}`).join("<br>")}</span>　<a href="library.html#list">蔵書を開く</a></div>`;
 }
 // 原作と映画（映画チェッカーにある映画化作品）
 function adaptHTML(b){
@@ -647,7 +659,21 @@ function pool(){
   const gOk = b => !g || (g==="L" ? b.kd==="L" : b.g.includes(g));
   return books.filter(b=>!read[b.k] && (!t || tierOf(b.sc)===t) && (!c || b.c===c) && gOk(b) && (tr==="all" || b.tr!==0) && (!w || (w==="want" ? want[b.k] : w==="own" ? own[b.k] : (want[b.k] || own[b.k]))));
 }
+// 読みかけのシリーズの次の巻（蔵書の記録から。要件 7章・修正指示書 C-2）
+function seriesPool(){ return window.Lib ? Lib.nextReads() : [] }
+let pickSer = null;
+function renderSeriesPick(){
+  const p = seriesPool();
+  if(!p.length){ $("pickCard").innerHTML = `<p style="margin:0;color:var(--muted)">読みかけのシリーズはありません（シリーズのどれかの巻に読了が付いていると、次の巻が候補になります）。</p>`; return }
+  if(pickSer == null || pickSer >= p.length) pickSer = hash(today() + "|series") % p.length;
+  const x = p[pickSer], it = x.item;
+  $("pickCard").innerHTML = `<div style="display:grid;gap:8px">
+    <div class="pt">${esc(x.t)}</div>
+    <div class="pm">${x.kind === "sr" ? `<span>シリーズ『${esc(x.name)}』</span>` : ""}<span>${esc(it.a || "")}</span>${it.loc ? `<span>保管場所：${esc(it.loc)}</span>` : ""}<span>${x.own ? "所有" : "<b>未所持</b>"}</span><span>候補 ${p.length}件から</span></div>
+    <div class="pb"><button class="btn pri" data-a="againS">別のシリーズ</button><a class="btn" href="library.html#list">蔵書で開く</a></div></div>`;
+}
 function renderPick(){
+  if($("pWant").value === "series") return renderSeriesPick();
   const p = pool();
   if(!p.length){ $("pickCard").innerHTML = `<p style="margin:0;color:var(--muted)">この条件の未読作品はありません。条件を変えてみてください。</p>`; return }
   if(!pickKey || !p.some(b=>b.k===pickKey)){
@@ -668,7 +694,9 @@ function renderPick(){
     </div></div>`;
 }
 function onPickClick(e){
-  const a = e.target.closest("[data-a]")?.dataset.a; if(!a || !pickKey) return;
+  const a0 = e.target.closest("[data-a]")?.dataset.a;
+  if(a0 === "againS"){ const n = seriesPool().length; if(n > 1){ let r; do r = Math.floor(Math.random()*n); while(r === pickSer); pickSer = r } renderPick(); return }
+  const a = a0; if(!a || !pickKey) return;
   const k = pickKey;
   if(a==="again"){ const p = pool().filter(b=>b.k!==k); if(p.length) pickKey = p[Math.floor(Math.random()*p.length)].k; renderPick() }
   else if(a==="want"){ toggleWant(k); refreshRow(k); renderPick() }
@@ -691,7 +719,7 @@ function renderStats(){
     <div><h3>時代別</h3>${hbars(group(b=>eraOf(b.y)[0], ERAS.map(e=>[e[0],e[1]])))}</div>
     <div><h3>国別（多い12か国）</h3>${hbars(group(b=>b.c, top))}</div>
     <div><h3>リスト別</h3>${hbars(ORDER.map(k=>{ const fs = books.filter(b=>k in b.s); return [L[k].name, fs.filter(b=>read[b.k]).length, fs.length] }))}</div>
-    <div><h3>所有</h3>${(()=>{ const ks = Object.keys(own).filter(k=>byKey.has(k)), rd = ks.filter(k=>read[k]).length; return hbars([["所有している本", ks.length, books.length], ["所有のうち読了", rd, ks.length], ["積読（所有・未読）", ks.length - rd, ks.length]]) })()}</div>
+    <div><h3>所有</h3>${(()=>{ const ks = Object.keys(own).filter(k=>byKey.has(k)), rd = ks.filter(k=>read[k]).length, eb = ks.filter(ownEbookOnly).length; return hbars([["所有している本（掲載作の所有率）", ks.length, books.length], ["うち電子だけで所有", eb, ks.length], ["所有のうち読了", rd, ks.length], ["積読（所有・未読）", ks.length - rd, ks.length]]) })()}</div>
     <div><h3>年ごとの読了冊数</h3>${ys.length ? `<div class="hb">${ys.map(y=>`<span class="lb">${y}年</span><span class="tr"><i style="width:${years[y]/mx*100}%"></i></span><span class="vl">${years[y]}冊</span>`).join("")}</div>` : `<p style="margin:0;color:var(--muted);font-size:13px">読んだ日を入れた作品を年ごとに集計します。まだ記録がありません。</p>`}${undated ? `<p style="margin:6px 0 0;color:var(--muted);font-size:13px">日付なしの読了 ${undated}冊</p>` : ""}</div>`;
 }
 

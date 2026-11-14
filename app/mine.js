@@ -1,10 +1,13 @@
 // 作品の詳細の「自分の感想」（2026-11-13）
 // shelf-data の tools/sns_match.py が records/sns/links.json に書く、作品ごとの自分の投稿（X・Mastodon・Bluesky）を出す。
-//   links.json：{at, links:{"種類:番号":[投稿の番号]}, posts:{番号:{d, text, url}}}
+//   links.json：{at, links:{"種類:番号":[投稿の番号]}}。投稿の本文は年ごとのファイル records/sns/posts-YYYY.json：{posts:{番号:{d, text, url}}}
+//   （2026-11-14 に分けた。修正指示書 C。前の形の links.json の posts が残っていれば、それも読む）
 // 必読書・映画・蔵書・ドラマとアニメの詳細から使う。見た目はどの画面でも同じにする（チェッカーの揃え方）。
 "use strict";
 window.Mine = (() => {
-  const PATH = "records/sns/links.json";
+  const PATH = "records/sns/links.json", POSTS = "records/sns/posts-";
+  // 投稿の本文（読み込んである年のファイルから探す）
+  const post = id => { for (const p of Shelf.list(POSTS)) { const x = Shelf.read(p)?.posts?.[id]; if (x) return x; } return Shelf.read(PATH)?.posts?.[id] || null; };
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const SRC = { x: "X", mstdn: "Mastodon", bsky: "Bluesky" };
   let styled = false;
@@ -25,7 +28,7 @@ window.Mine = (() => {
     const d = window.Shelf && Shelf.read(PATH); if (!d) return [];
     const ids = new Set();
     for (const t of targets) for (const i of d.links?.[t] || []) ids.add(i);
-    return [...ids].map(i => ({ id: i, ...(d.posts?.[i] || {}) })).filter(p => p.text).sort((a, b) => (a.d || "").localeCompare(b.d || ""));
+    return [...ids].map(i => ({ id: i, ...(post(i) || {}) })).filter(p => p.text).sort((a, b) => (a.d || "").localeCompare(b.d || ""));
   }
   const one = p => `<div class="mp"><span class="pm">${esc(p.d)}・${SRC[p.id.split(":")[0]] || ""}${p.url ? `　<a href="${esc(p.url)}" target="_blank" rel="noopener">投稿を開く</a>` : ""}</span>${esc(p.text)}</div>`;
   // 詳細に差し込む部分。投稿が無ければ空
@@ -37,5 +40,5 @@ window.Mine = (() => {
       ${ps.slice(0, show).map(one).join("")}
       ${ps.length > show ? `<details><summary>ほかの投稿 ${ps.length - show}件</summary>${ps.slice(show).map(one).join("")}</details>` : ""}</div>`;
   }
-  return { PATH, posts, html };
+  return { PATH, POSTS, post, posts, html };
 })();

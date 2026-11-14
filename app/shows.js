@@ -48,6 +48,9 @@ async function fetchShow(id) {
 
 // ---------- 記録 ----------
 const items = () => Shelf.read(P)?.items || {};
+// 放送が始まったシーズン（放送日が今日以前で、1話以上）。製作が発表されただけのシーズンは「新しいシーズン」と数えない（修正指示書 B-4）
+const airedSs = ss => (ss || []).filter(z => z.air && z.air <= UI.today() && (z.eps || 0) >= 1);
+const soonOf = ss => { const u = (ss || []).filter(z => z.air && z.air > UI.today()); return u.length ? { n: u[0].n, air: u[0].air } : null; };
 const put = it => { it.u = UI.nowIso(); Shelf.writeItem(P, it.id, it); return it; };
 const mySvc = () => { const it = Shelf.read("records/services.json")?.items; return it ? Object.keys(it).filter(k => it[k]?.on) : ["Prime Video", "U-NEXT"]; };
 // 放送済みの話数（次に放送される話より前まで。放送開始前のシーズンは0）
@@ -113,7 +116,7 @@ function rowHtml(it) {
   return `<li data-id="${esc(it.id)}"><div class="li-wrap">
       ${it.img ? `<img class="poster" loading="lazy" alt="" src="https://image.tmdb.org/t/p/w154${esc(it.img)}">` : `<div class="poster"></div>`}
       <button type="button" class="open" data-open aria-expanded="${open}"><span class="t">${esc(it.t)}</span>
-        <span class="m"><span>${esc(it.cat || "")}</span>${it.y ? `<span>${it.y}〜</span>` : ""}<span>${esc(it.status || "")}</span><span>全${(it.ss || []).length}シーズン</span>${it.newS ? `<span class="pill acc">新シーズン（シーズン${it.newS}）</span>` : ""}${vodTag(it)}</span>
+        <span class="m"><span>${esc(it.cat || "")}</span>${it.y ? `<span>${it.y}〜</span>` : ""}<span>${esc(it.status || "")}</span><span>全${airedSs(it.ss).length || (it.ss || []).length}シーズン</span>${it.newS ? `<span class="pill acc">新シーズン（シーズン${it.newS}）</span>` : ""}${it.soon?.air && it.soon.air > UI.today() ? `<span class="pill">次のシーズン ${esc(it.soon.air.replace(/^(\d{4})-0?(\d+)-0?(\d+)$/, "$2月$3日"))}から</span>` : ""}${vodTag(it)}</span>
         <span class="next">${nx}</span><span class="m">${air}</span>
         <span class="prog" title="${s.done}/${s.all}話"><i style="width:${pct}%"></i></span></button>
       <span class="small muted">${s.done}/${s.all}話<br>${ST_NM[it.st] || ""}</span>
@@ -240,7 +243,7 @@ $("list").addEventListener("click", async e => {
   const al = e.target.closest("[data-all]"); if (al) { const s = it.ss.find(x => x.n === +al.dataset.all); setEps(it, s.n, Array.from({ length: s.eps }, (_, i) => i + 1)); afterMark(it); put(it); redraw(); return; }
   const no = e.target.closest("[data-none]"); if (no) { setEps(it, +no.dataset.none, []); put(it); redraw(); return; }
   if (e.target.closest("[data-refresh]")) {
-    try { const info = await fetchShow(it.tm); if ((info.ss || []).length > (it.ss || []).length) info.newS = info.ss[info.ss.length - 1].n; put({ ...it, ...info }); UI.toast("取り直しました"); redraw(); }
+    try { const info = await fetchShow(it.tm); const a = airedSs(info.ss), b = airedSs(it.ss); if (it.ss && a.length > b.length) info.newS = a[a.length - 1].n; info.soon = soonOf(info.ss); put({ ...it, ...info }); UI.toast("取り直しました"); redraw(); }
     catch (err) { UI.toast(err.message); }
     return;
   }
@@ -249,7 +252,7 @@ $("list").addEventListener("click", async e => {
 
 (async () => {
   if (!Shelf.token()) { $("main").prepend(UI.keyCard()); return; }
-  await Shelf.init({ need: ["records/shows.json", "records/keys.json", "records/services.json", "records/sns/links.json"] });
+  await Shelf.init({ need: ["records/shows.json", "records/keys.json", "records/services.json", "records/sns/links.json", "records/sns/posts-"] });
   render(); renderTime(); fromHash();
   Shelf.on(P, () => { render(); renderTime(); });
 })();

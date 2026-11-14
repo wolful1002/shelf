@@ -2,6 +2,19 @@
 // 済んだ印は records/settings.json の fixes に残す（どの端末でも二度は行わない）
 "use strict";
 const FIXES = [
+  // 2026-11-14：同じISBNの記録の重複（点検で195組）をまとめる（修正指示書 A-3）。本人の了解が要るので、settings の ok に印があるときだけ行う。
+  // 本と本は Lib.mergeInto、本とシリーズの巻は本を巻へ移す。必読書と結び付いた記録・保管場所が両方にある組は、確認待ち「同じ本かどうか」に出す。
+  // 実行の直前に backup/ に控えを取る。2026-11-14 の分は会話から同じ手順で行い、済みの印を付けた
+  {
+    id: "2026-11-14-isbn-dups",
+    when: s => !!s.ok?.["2026-11-14-isbn-dups"],
+    async run(log) {
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      for (const p of Shelf.list("records/library/").concat([Lib.P.queue, Lib.P.reading, Lib.P.novelDoc])) { const d = Shelf.read(p); if (d) Shelf.writeDoc(`backup/${stamp}-isbn/${p}`, d); }
+      const r = Lib.runSameIsbn(Lib.planSameIsbn());
+      log.push(`同じISBNの記録：${r.merged}件をまとめ、${r.asked}組を確認待ちに出しました（控え：backup/${stamp}-isbn/）`);
+    },
+  },
   // 2026-10-23：購入履歴の取り込みで、書誌の「巻」に入っていたレーベルの通し番号（中公新書 1996 など）を巻と取り違えて、
   // 1冊の本をシリーズにしてしまったものを直す。Amazonの注文での書名に巻数が無ければ1冊の本に戻し、あれば正しい巻に付け替える
   {
@@ -182,16 +195,17 @@ const FIXES = [
 
 async function runFixes() {
   const s = Lib.settings(); const doneFix = s.fixes || {};
-  const todo = FIXES.filter(f => !doneFix[f.id]);
+  const todo = FIXES.filter(f => !doneFix[f.id] && (!f.when || f.when(s)));
   if (!todo.length) return;
   const log = [];
   Lib.batchBegin();
   try { for (const f of todo) await f.run(log); }
   catch (e) { Lib.batchDiscard(); UI.toast("記録の手直しができませんでした：" + e.message, 6000); return; }
   Lib.batchCommit();
-  const s2 = JSON.parse(JSON.stringify(Lib.settings())); s2.fixes = s2.fixes || {};
-  for (const f of todo) s2.fixes[f.id] = new Date().toISOString();
-  s2.fixLog = [...(s2.fixLog || []), ...log.map(m => ({ at: new Date().toISOString(), m }))].slice(-30);
-  Shelf.writeDoc(Lib.P.settings, s2);
+  Lib.editSettings(s2 => {
+    s2.fixes = s2.fixes || {};
+    for (const f of todo) s2.fixes[f.id] = new Date().toISOString();
+    s2.fixLog = [...(s2.fixLog || []), ...log.map(m => ({ at: new Date().toISOString(), m }))].slice(-30);
+  });
   UI.toast(log.join("。"), 8000);
 }

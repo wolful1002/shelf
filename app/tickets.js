@@ -12,8 +12,12 @@ window.Tickets = (() => {
   const WD = "日月火水木金土";
   const T = {};
   T.paths = [P, A, W, O];
-  T.all = () => { const it = Shelf.read(P)?.items || {}; return Object.entries(it).map(([id, t]) => ({ id, ...t })).sort((a, b) => a.start.localeCompare(b.start)); };
   T.ans = id => Shelf.read(A)?.items?.[id] || null;
+  // pick：映画チェッカーの古い作品と同じ題名の新作があるとき。本人が「新作」を選んだ回は、新作（リスト外の映画）として扱う
+  const eff = t => t.pick && T.ans(t.id)?.which === "new" ? { ...t, fk: undefined, tm: t.pick.tm, y: t.pick.y } : t;
+  T.all = () => { const it = Shelf.read(P)?.items || {}; return Object.entries(it).map(([id, t]) => eff({ id, ...t })).sort((a, b) => a.start.localeCompare(b.start)); };
+  // 読めなかった予約メール（書式の分からない館など）の数。ACチケットは数えない（tools/tickets.py が外す）
+  T.unread = () => (Shelf.read(P)?.unread || []).length;
   // 状態：cancel（取り消し）／seen・no（本人が決めた）／soon（これから）／ask（上映を過ぎて、まだ決めていない）
   T.state = t => t.cancel ? "cancel" : T.ans(t.id)?.v || ((t.end || t.start) > nowLocal() ? "soon" : "ask");
   T.soon = () => T.all().filter(t => T.state(t) === "soon");
@@ -39,7 +43,7 @@ window.Tickets = (() => {
   function applySeen(t) {
     const d = day(t);
     if (t.fk) {
-      const w = JSON.parse(JSON.stringify(Shelf.read(W) || { seen: {}, want: {}, rw: {}, wh: {}, ts: {} }));
+      const w0 = JSON.parse(JSON.stringify(Shelf.read(W) || {})), w = JSON.parse(JSON.stringify(Shelf.read(W) || { seen: {}, want: {}, rw: {}, wh: {}, ts: {} }));
       for (const k of ["seen", "want", "rw", "wh", "ts"]) w[k] = w[k] || {};
       const clk = stamp(w), mark = n => (w.ts[n] = w.ts[n] || {})[t.fk] = clk();
       const k = t.fk, s = w.seen[k];
@@ -52,11 +56,11 @@ window.Tickets = (() => {
       if (w.want[k]) { delete w.want[k]; mark("want"); }
       if (t.venue && !w.wh[k]?.[d]) { w.wh[k] = { ...(w.wh[k] || {}), [d]: t.venue }; mark("wh"); }
       w.v = 2; w.updated = new Date().toISOString();
-      Shelf.writeDoc(W, w);
+      Shelf.writeDoc(W, w, w0);
       return;
     }
     // リスト外の映画：同じ題名の記録があれば、日付と館の空いているところだけ埋める（リスト外の映画は1作につき1回分を持つ）
-    const o = JSON.parse(JSON.stringify(Shelf.read(O) || { items: [], ts: {} }));
+    const o0 = JSON.parse(JSON.stringify(Shelf.read(O) || {})), o = JSON.parse(JSON.stringify(Shelf.read(O) || { items: [], ts: {} }));
     o.items = o.items || []; o.ts = o.ts || {}; o.ts.off = o.ts.off || {};
     const clk = stamp(o), key = x => normT(x.t) + "_" + (x.y || "");
     let e = o.items.find(x => normT(x.t) === normT(t.t));
@@ -72,11 +76,13 @@ window.Tickets = (() => {
       o.items.push(e); o.ts.off[key(e)] = clk();
     }
     o.v = 2; o.updated = new Date().toISOString();
-    Shelf.writeDoc(O, o);
+    Shelf.writeDoc(O, o, o0);
   }
-  T.answer = (t, v) => {
-    if (v === "seen") applySeen(t);
-    Shelf.writeItem(A, t.id, { v, at: new Date().toISOString() });
+  // which：同じ題名の新作があるとき、"old"（映画チェッカーの作品・再上映）か "new"（新作）
+  T.answer = (t, v, which) => {
+    const t2 = t.pick && which === "new" ? { ...t, fk: undefined, tm: t.pick.tm, y: t.pick.y } : t;
+    if (v === "seen") applySeen(t2);
+    Shelf.writeItem(A, t.id, { v, at: new Date().toISOString(), ...(t.pick && which ? { which } : {}) });
   };
   T.undo = t => Shelf.writeItem(A, t.id, null);   // 決めたことを取り消す（鑑賞の記録はそのまま。直すときはチェッカーで）
 
@@ -85,7 +91,8 @@ window.Tickets = (() => {
     const L = Shelf.read("records/sns/links.json"); if (!L) return [];
     const ids = [...(L.links?.[t.fk ? "film:" + t.fk : "off:" + snsNorm(t.t)] || [])];
     const d0 = new Date(day(t)), out = [];
-    for (const i of ids) { const p = L.posts?.[i]; if (!p) continue; const dd = (new Date(p.d.slice(0, 10)) - d0) / 864e5; if (dd >= -1 && dd <= 3) out.push({ id: i, ...p }); }
+    const post = id => { for (const f of Shelf.list("records/sns/posts-")) { const x = Shelf.read(f)?.posts?.[id]; if (x) return x; } return L.posts?.[id]; };
+    for (const i of ids) { const p = post(i); if (!p) continue; const dd = (new Date(p.d.slice(0, 10)) - d0) / 864e5; if (dd >= -1 && dd <= 3) out.push({ id: i, ...p }); }
     return out.sort((a, b) => a.d.localeCompare(b.d));
   };
   function snsNorm(s) {   // tools/sns_match.py の norm と同じ
@@ -94,19 +101,24 @@ window.Tickets = (() => {
   }
 
   // ホームなどに出す「映画館の予約」の欄
+  const filmYear = t => (Shelf.read("works/films.json")?.films || []).find(f => f.k === t.fk)?.y || "";
   T.html = () => {
     const asks = T.asks(), soon = T.soon();
-    if (!asks.length && !soon.length) return "";
     const row = (t, ask) => {
       const rec = ask && T.recorded(t), hs = ask ? T.hints(t) : [];
       return `<li class="tk" data-tk="${esc(t.id)}"><div><a href="${T.workURL(t)}"><b>${esc(T.title(t))}</b></a> <span class="small">${esc(T.when(t))}</span></div>
         <div class="small muted">${esc(T.detail(t))}</div>
         ${ask ? `<div class="small">${rec ? "この日の鑑賞はもう記録にあります。「観た」で館の名前を足します。" : "この回を観ましたか。"}</div>
         ${hs.slice(0, 2).map(p => `<div class="small muted tkh">${esc(p.d)}　${esc(p.text.slice(0, 120))}</div>`).join("")}
-        <div class="row"><button type="button" class="small pri" data-tkv="seen">観た</button><button type="button" class="small quiet" data-tkv="no">観なかった</button></div>` : ""}</li>`;
+        ${t.pick ? `<div class="small">同じ題名の作品が2つあります。どちらを観ましたか（名画座などの再上映なら古い方です）。</div>
+        <div class="row"><button type="button" class="small pri" data-tkv="seen" data-which="new">観た：新作（${esc(t.pick.y)}年）</button><button type="button" class="small" data-tkv="seen" data-which="old">観た：${esc(T.title(t))}（${esc(filmYear(t))}年・再上映）</button><button type="button" class="small quiet" data-tkv="no">観なかった</button></div>`
+        : `<div class="row"><button type="button" class="small pri" data-tkv="seen">観た</button><button type="button" class="small quiet" data-tkv="no">観なかった</button></div>`}` : ""}</li>`;
     };
+    const un = T.unread();
+    const unHtml = un ? `<p class="small"><span class="pill warn">読めなかったメール ${un}通</span> 予約確認のメールの書式が分からず、予約にできませんでした。Claude に「読めなかった予約メールを見て」と頼んでください。</p>` : "";
+    if (!asks.length && !soon.length) return unHtml;
     const N = 5;   // 多いときは新しい5件だけ出し、残りは開いて見る
-    return `${asks.length ? `<h3 class="tkhd">観たか確かめる（${asks.length}件）</h3><ul class="list">${asks.slice(0, N).map(t => row(t, true)).join("")}</ul>
+    return `${unHtml}${asks.length ? `<h3 class="tkhd">観たか確かめる（${asks.length}件）</h3><ul class="list">${asks.slice(0, N).map(t => row(t, true)).join("")}</ul>
       ${asks.length > N ? `<details><summary class="small">残りの ${asks.length - N}件を開く</summary><ul class="list">${asks.slice(N).map(t => row(t, true)).join("")}</ul></details>` : ""}` : ""}
       ${soon.length ? `<h3 class="tkhd">これからの予約（${soon.length}件）</h3><ul class="list">${soon.map(t => row(t, false)).join("")}</ul>` : ""}`;
   };
@@ -114,7 +126,8 @@ window.Tickets = (() => {
   T.bind = (el, after) => el.addEventListener("click", e => {
     const b = e.target.closest("[data-tkv]"); if (!b) return;
     const t = T.all().find(x => x.id === b.closest("[data-tk]").dataset.tk); if (!t) return;
-    T.answer(t, b.dataset.tkv);
+    const raw = { ...(Shelf.read(P)?.items?.[t.id] || {}), id: t.id };
+    T.answer(raw, b.dataset.tkv, b.dataset.which);
     UI.toast(b.dataset.tkv === "seen" ? `『${T.title(t)}』を${day(t)}の鑑賞として記録しました` : "観なかった回として残しました");
     after && after();
   });

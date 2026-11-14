@@ -247,7 +247,7 @@ $("yesBtn").onclick = async () => {
   Lib.batchBegin();
   try { await runAll(PLAN.rows); } catch (e) { Lib.batchDiscard(); setMsg("登録できませんでした：" + e.message); return; }
   const n = Lib.batchCommit();
-  const st = JSON.parse(JSON.stringify(Lib.settings())); st.imports = { ...(st.imports || {}), [DIR]: new Date().toISOString() }; Shelf.writeDoc(Lib.P.settings, st);
+  Lib.editSettings(st => { st.imports = { ...(st.imports || {}), [DIR]: new Date().toISOString() }; });
   setMsg(`登録しました（${n}個のファイルを送っています。上の「保存済み」を確かめてください）。控えは backup/${stamp}/ にあります。`);
   $("doneLinks").hidden = false;
 };

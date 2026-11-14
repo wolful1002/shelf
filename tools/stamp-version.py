@@ -8,7 +8,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 V = time.strftime("%Y%m%d%H%M", time.gmtime())
 
 # <script src="app/x.js">・<link href="app/x.css">・チェッカーの CFG.code（"app/legacy-x.js"）
-REF = re.compile(r'((?:src|href)="|"code": ")(app/[\w.-]+\.(?:js|css))(?:\?v=\d+)?(")')
+REF = re.compile(r'((?:src|href)="|"code": ")(app/[\w./-]+\.(?:js|css))(?:\?v=\d+)?(")')
 
 for name in sorted(os.listdir(ROOT)):
     if not name.endswith(".html"):
